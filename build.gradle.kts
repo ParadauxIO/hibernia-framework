@@ -60,10 +60,8 @@ tasks.jar { enabled = true }
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {
-            // Publish the UN-SHADED framework
-            from(components["java"])
-            artifact(tasks.named("sourcesJar"))
-//            artifact(tasks.named("javadocJar"))
+            from(components["java"])     // includes sources because of withSourcesJar()
+            // DO NOT add: artifact(tasks.named("sourcesJar"))
 
             groupId = project.group.toString()
             artifactId = "hibernia-framework"
@@ -80,12 +78,7 @@ publishing {
                         distribution.set("repo")
                     }
                 }
-                developers {
-                    developer {
-                        id.set("rian")
-                        name.set("Rían Errity")
-                    }
-                }
+                developers { developer { id.set("rian"); name.set("Rían Errity") } }
                 scm {
                     url.set("https://github.com/ParadauxIO/hibernia-framework")
                     connection.set("scm:git:https://github.com/ParadauxIO/hibernia-framework.git")
