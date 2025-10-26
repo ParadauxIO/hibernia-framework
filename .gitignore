@@ -1,4 +1,13 @@
+# Gradle
 .gradle/
+build/
+
+# IntelliJ
 .idea/
 *.iml
-build/
+*.ipr
+*.iws
+
+# Darwin has a stupid file system.
+.DS_Store
+Thumbs.db
