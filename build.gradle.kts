@@ -5,7 +5,9 @@ plugins {
 }
 
 group = "io.paradaux"
-version = (findProperty("version") as String?) ?: "0.1.0-SNAPSHOT"
+version = System.getenv("PUBLISH_VERSION")
+    ?: (findProperty("version") as String?)
+            ?: "0.1.0-SNAPSHOT"
 
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(21))
@@ -88,7 +90,7 @@ publishing {
         }
     }
     repositories {
-        val isSnapshot = version.toString().endsWith("SNAPSHOT", ignoreCase = true)
+        val isSnapshot = version.toString().endsWith("-SNAPSHOT")
         maven {
             name = if (isSnapshot) "ReposiliteSnapshots" else "ReposiliteReleases"
             url = uri(if (isSnapshot) "https://repo.paradaux.io/snapshots" else "https://repo.paradaux.io/releases")

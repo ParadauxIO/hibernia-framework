@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # Your Reposilite creds stored as GitHub Secrets
       REPO_USER: ${{ secrets.REPO_USER }}
       REPO_PASS: ${{ secrets.REPO_PASS }}
 
@@ -26,14 +25,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Debug env presence
-        run: |
-          echo "REPO_USER set? $([ -n "$REPO_USER" ] && echo yes || echo no)"
-          echo "REPO_PASS set? $([ -n "$REPO_PASS" ] && echo yes || echo no)"
-        env:
-          REPO_USER: ${{ secrets.REPO_USER }}
-          REPO_PASS: ${{ secrets.REPO_PASS }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -79,7 +70,7 @@ jobs:
 
       - name: Build & publish
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        run: ./gradlew --no-daemon clean build publish -Pversion=0.1.0-SNAPSHOT
+        run: ./gradlew --no-daemon clean build publish -Pversion=${{ steps.pick.outputs.version }}
         env:
           REPO_USER: ${{ secrets.REPO_USER }}
           REPO_PASS: ${{ secrets.REPO_PASS }}
