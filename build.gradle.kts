@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "io.paradaux"
-version = "0.1.0-SNAPSHOT"
+version = (findProperty("version") as String?) ?: "0.1.0-SNAPSHOT"
 
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(21))
