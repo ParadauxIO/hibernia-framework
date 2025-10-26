@@ -5,9 +5,9 @@ plugins {
 }
 
 group = "io.paradaux"
-version = System.getenv("PUBLISH_VERSION")
-    ?: (findProperty("version") as String?)
-            ?: "0.1.0-SNAPSHOT"
+version = providers.gradleProperty("version")
+    .orElse("0.1.0-SNAPSHOT")
+    .get()
 
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(21))
