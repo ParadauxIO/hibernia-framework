@@ -1,0 +1,85 @@
+name: Build & Publish
+
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      # Your Reposilite creds stored as GitHub Secrets
+      REPO_USER: ${{ secrets.REPO_USER }}
+      REPO_PASS: ${{ secrets.REPO_PASS }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v3
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Set Gradle cache
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Determine base version from Gradle
+        id: ver
+        run: |
+          # Ask Gradle for its resolved project version (whatever is in build.gradle.kts)
+          BASE_VERSION="$(./gradlew -q properties | awk -F': ' '/^version:/ {print $2}' | head -n1)"
+          echo "base=$BASE_VERSION" >> $GITHUB_OUTPUT
+          echo "Base version from Gradle: $BASE_VERSION"
+
+      - name: Compute publish version
+        id: pick
+        run: |
+          BASE="${{ steps.ver.outputs.base }}"
+
+          # Strip any trailing -SNAPSHOT to get the release core
+          CORE="${BASE%-SNAPSHOT}"
+
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            # main → publish a non-snapshot
+            PUBLISH_VERSION="$CORE"
+          else
+            # develop (or manual default) → publish snapshot
+            # Ensure it ends with -SNAPSHOT exactly once
+            if [[ "$CORE" == *-SNAPSHOT ]]; then
+              PUBLISH_VERSION="$CORE"
+            else
+              PUBLISH_VERSION="$CORE-SNAPSHOT"
+            fi
+          fi
+
+          echo "version=$PUBLISH_VERSION" >> $GITHUB_OUTPUT
+          echo "Will publish version: $PUBLISH_VERSION"
+
+      - name: Build & Publish
+        run: |
+          ./gradlew --no-daemon clean build publish -Pversion='${{ steps.pick.outputs.version }}' --stacktrace
+
+      - name: Echo where it went
+        run: |
+          if [[ "${{ steps.pick.outputs.version }}" == *-SNAPSHOT ]]; then
+            echo "Published SNAPSHOT → snapshots repo."
+          else
+            echo "Published RELEASE → releases repo."
+          fi
