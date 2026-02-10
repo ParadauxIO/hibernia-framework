@@ -126,7 +126,13 @@ public class CommandManager {
 
                 for (String root : cmdAnn.value()) {
                     LiteralArgumentBuilder<CommandSourceStack> rootBuilder =
-                            roots.computeIfAbsent(root, Commands::literal);
+                            roots.computeIfAbsent(root, k -> {
+                                LiteralArgumentBuilder<CommandSourceStack> b = Commands.literal(k);
+                                if (classPerm != null) {
+                                    b.requires(src -> src.getSender().hasPermission(classPerm));
+                                }
+                                return b;
+                            });
 
                     buildCommandTree(rootBuilder, handler, routes, classPerm);
                 }
@@ -178,7 +184,8 @@ public class CommandManager {
         if (segment.literal) {
             LiteralArgumentBuilder<CommandSourceStack> literal = Commands.literal(segment.token);
 
-            if (depth == binding.path.size() - 1 && binding.permission != null) {
+            // Gate permission on the first node so the entire subtree is hidden
+            if (depth == 0 && binding.permission != null) {
                 literal.requires(src -> src.getSender().hasPermission(binding.permission));
             }
             if (depth == binding.path.size() - 1) {
@@ -197,7 +204,8 @@ public class CommandManager {
             // Resolver-driven suggestions (with placeholder fallback)
             argBuilder.suggests(createArgumentSuggestionProvider(matchingParam));
 
-            if (depth == binding.path.size() - 1 && binding.permission != null) {
+            // Gate permission on the first node so the entire subtree is hidden
+            if (depth == 0 && binding.permission != null) {
                 argBuilder.requires(src -> src.getSender().hasPermission(binding.permission));
             }
             if (depth == binding.path.size() - 1) {
@@ -221,9 +229,6 @@ public class CommandManager {
         if (segment.literal) {
             LiteralArgumentBuilder<CommandSourceStack> literal = Commands.literal(segment.token);
 
-            if (depth == binding.path.size() - 1 && binding.permission != null) {
-                literal.requires(src -> src.getSender().hasPermission(binding.permission));
-            }
             if (depth == binding.path.size() - 1) {
                 literal.executes(ctx -> executeBinding(ctx, binding));
             } else {
@@ -239,9 +244,6 @@ public class CommandManager {
 
             argBuilder.suggests(createArgumentSuggestionProvider(matchingParam));
 
-            if (depth == binding.path.size() - 1 && binding.permission != null) {
-                argBuilder.requires(src -> src.getSender().hasPermission(binding.permission));
-            }
             if (depth == binding.path.size() - 1) {
                 argBuilder.executes(ctx -> executeBinding(ctx, binding));
             } else {
