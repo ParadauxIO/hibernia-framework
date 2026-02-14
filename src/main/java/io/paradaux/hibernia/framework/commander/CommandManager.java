@@ -37,7 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Responsibilities:
  * - Scans provided CommandHandler instances for @Command and @Route annotations,
  *   and builds a Brigadier command tree for Paper.
- * - Binds method parameters annotated with @Arg, @OptionalArg and @Sender to
+ * - Binds method parameters annotated with @Arg, @OptionalArg, @GreedyArg and @Sender to
  *   command arguments and injects them at invocation time.
  * - Respects @Permission on classes or methods to gate execution.
  * - Supports asynchronous execution for methods annotated with @Async.</p>
@@ -258,10 +258,11 @@ public class CommandManager {
     private RequiredArgumentBuilder<CommandSourceStack, ?> createArgumentBuilder(String name, Param param) {
         if (param.type == Integer.class || param.type == int.class) {
             return Commands.argument(name, IntegerArgumentType.integer());
+        } else if (param.greedy) {
+            return Commands.argument(name, StringArgumentType.greedyString());
         } else if (param.type == BigDecimal.class) {
             return Commands.argument(name, StringArgumentType.word());
         } else {
-            // No greedy strings
             return Commands.argument(name, StringArgumentType.word());
         }
     }
@@ -415,14 +416,25 @@ public class CommandManager {
         }
 
         List<Param> params = new ArrayList<>();
+        boolean foundGreedy = false;
         for (Parameter rp : m.getParameters()) {
             boolean isSender = rp.isAnnotationPresent(Sender.class);
             Arg arg = rp.getAnnotation(Arg.class);
             OptionalArg opt = rp.getAnnotation(OptionalArg.class);
+            GreedyArg greedy = rp.getAnnotation(GreedyArg.class);
+
+            if (foundGreedy && !isSender) {
+                throw new IllegalStateException("@GreedyArg must be the last argument in the route on " + m);
+            }
+
             if (isSender) params.add(Param.sender(rp.getType()));
+            else if (greedy != null) {
+                foundGreedy = true;
+                params.add(Param.greedy(rp.getType(), greedy.value(), greedy.sanitize()));
+            }
             else if (arg != null) params.add(Param.required(rp.getType(), arg.value(), arg.sanitize()));
             else if (opt != null) params.add(Param.optional(rp.getType(), opt.value(), opt.defaultValue(), opt.sanitize()));
-            else throw new IllegalStateException("Parameter missing @Sender/@Arg/@OptionalArg on " + m);
+            else throw new IllegalStateException("Parameter missing @Sender/@Arg/@OptionalArg/@GreedyArg on " + m);
         }
 
         String methodPerm = Optional.ofNullable(m.getAnnotation(Permission.class)).map(Permission::value).orElse(null);
@@ -442,10 +454,11 @@ public class CommandManager {
         }
     }
 
-    private record Param(boolean sender, boolean optional, boolean sanitize, Class<?> type, String name, Object defaultValue) {
-        static Param sender(Class<?> t) { return new Param(true, false, true, t, "", null); }
-        static Param required(Class<?> t, String n, boolean sanitize) { return new Param(false, false, sanitize, t, n, null); }
-        static Param optional(Class<?> t, String n, Object def, boolean sanitize) { return new Param(false, true, sanitize, t, n, def); }
+    private record Param(boolean sender, boolean optional, boolean sanitize, boolean greedy, Class<?> type, String name, Object defaultValue) {
+        static Param sender(Class<?> t) { return new Param(true, false, true, false, t, "", null); }
+        static Param required(Class<?> t, String n, boolean sanitize) { return new Param(false, false, sanitize, false, t, n, null); }
+        static Param greedy(Class<?> t, String n, boolean sanitize) { return new Param(false, false, sanitize, true, t, n, null); }
+        static Param optional(Class<?> t, String n, Object def, boolean sanitize) { return new Param(false, true, sanitize, false, t, n, def); }
     }
 
     private static class RouteBinding {
