@@ -17,6 +17,10 @@ public class StringResolver implements ParameterResolver<String> {
         if (token == null || token.isBlank()) {
             return Optional.empty();
         }
-        return Optional.of(StringUtils.sanitize(token));
+        String sanitized = StringUtils.sanitize(token);
+        if (sanitized.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(sanitized);
     }
 }
