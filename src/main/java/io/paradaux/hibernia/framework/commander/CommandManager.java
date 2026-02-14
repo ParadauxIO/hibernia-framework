@@ -299,6 +299,8 @@ public class CommandManager {
             try {
                 Object[] invokeArgs = extractArguments(context, binding, sender);
                 binding.method.invoke(binding.instance, invokeArgs);
+            } catch (IllegalArgumentException iae) {
+                safeMsg(sender, "§cError: " + iae.getMessage());
             } catch (InvocationTargetException ite) {
                 Throwable t = ite.getTargetException();
                 safeMsg(sender, "§cError: " + t.getMessage());
