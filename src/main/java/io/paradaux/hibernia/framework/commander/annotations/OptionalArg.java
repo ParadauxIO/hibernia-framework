@@ -38,4 +38,14 @@ public @interface OptionalArg {
      * @return the default value as string
      */
     String defaultValue() default "";
+
+    /**
+     * Whether to sanitize the argument value (strip MiniMessage tags, special characters, etc.).
+     *
+     * <p>Defaults to {@code true}. Set to {@code false} when the argument may contain
+     * special characters such as URLs (e.g. {@code https://example.com}).</p>
+     *
+     * @return {@code true} if the value should be sanitized
+     */
+    boolean sanitize() default true;
 }

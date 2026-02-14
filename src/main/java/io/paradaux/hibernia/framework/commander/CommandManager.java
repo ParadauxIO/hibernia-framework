@@ -37,7 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Responsibilities:
  * - Scans provided CommandHandler instances for @Command and @Route annotations,
  *   and builds a Brigadier command tree for Paper.
- * - Binds method parameters annotated with @Arg, @OptionalArg and @Sender to
+ * - Binds method parameters annotated with @Arg, @OptionalArg, @GreedyArg and @Sender to
  *   command arguments and injects them at invocation time.
  * - Respects @Permission on classes or methods to gate execution.
  * - Supports asynchronous execution for methods annotated with @Async.</p>
@@ -120,7 +120,7 @@ public class CommandManager {
                         .map(Permission::value).orElse(null);
 
                 List<Method> routes = Arrays.stream(clazz.getDeclaredMethods())
-                        .filter(m -> m.isAnnotationPresent(Route.class))
+                        .filter(m -> m.getAnnotationsByType(Route.class).length > 0)
                         .toList();
                 if (routes.isEmpty()) continue;
 
@@ -147,7 +147,9 @@ public class CommandManager {
 
         List<RouteBinding> bindings = new ArrayList<>();
         for (Method method : routes) {
-            bindings.add(bindRoute(handler, method, classPerm));
+            for (Route route : method.getAnnotationsByType(Route.class)) {
+                bindings.add(bindRoute(handler, method, route, classPerm));
+            }
         }
 
         Map<String, List<RouteBinding>> routesByFirstSegment = new HashMap<>();
@@ -256,10 +258,11 @@ public class CommandManager {
     private RequiredArgumentBuilder<CommandSourceStack, ?> createArgumentBuilder(String name, Param param) {
         if (param.type == Integer.class || param.type == int.class) {
             return Commands.argument(name, IntegerArgumentType.integer());
+        } else if (param.greedy) {
+            return Commands.argument(name, StringArgumentType.greedyString());
         } else if (param.type == BigDecimal.class) {
             return Commands.argument(name, StringArgumentType.word());
         } else {
-            // No greedy strings
             return Commands.argument(name, StringArgumentType.word());
         }
     }
@@ -297,6 +300,8 @@ public class CommandManager {
             try {
                 Object[] invokeArgs = extractArguments(context, binding, sender);
                 binding.method.invoke(binding.instance, invokeArgs);
+            } catch (IllegalArgumentException iae) {
+                safeMsg(sender, "§cError: " + iae.getMessage());
             } catch (InvocationTargetException ite) {
                 Throwable t = ite.getTargetException();
                 safeMsg(sender, "§cError: " + t.getMessage());
@@ -335,17 +340,26 @@ public class CommandManager {
                     try {
                         Object rawValue = context.getArgument(argName, Object.class);
 
-                        @SuppressWarnings("unchecked")
-                        ParameterResolver<Object> resolver = (ParameterResolver<Object>) resolvers.get(param.type);
-
-                        if (resolver != null) {
+                        // When sanitize is disabled for a String parameter, bypass the resolver
+                        if (!param.sanitize && param.type == String.class) {
                             String stringValue = rawValue.toString();
-                            values.add(resolver.resolve(stringValue, sender)
-                                    .orElseThrow(() -> new IllegalArgumentException("Invalid " + param.name + ": " + stringValue)));
-                        } else if (param.type == Integer.class || param.type == int.class) {
-                            values.add(rawValue);
+                            if (stringValue.isBlank()) {
+                                throw new IllegalArgumentException("Invalid " + param.name + ": blank value");
+                            }
+                            values.add(stringValue);
                         } else {
-                            values.add(rawValue.toString());
+                            @SuppressWarnings("unchecked")
+                            ParameterResolver<Object> resolver = (ParameterResolver<Object>) resolvers.get(param.type);
+
+                            if (resolver != null) {
+                                String stringValue = rawValue.toString();
+                                values.add(resolver.resolve(stringValue, sender)
+                                        .orElseThrow(() -> new IllegalArgumentException("Invalid " + param.name + ": " + stringValue)));
+                            } else if (param.type == Integer.class || param.type == int.class) {
+                                values.add(rawValue);
+                            } else {
+                                values.add(rawValue.toString());
+                            }
                         }
                     } catch (IllegalArgumentException e) {
                         if (param.optional) {
@@ -391,8 +405,7 @@ public class CommandManager {
         throw new IllegalArgumentException("Sender must be " + type.getSimpleName());
     }
 
-    private RouteBinding bindRoute(Object instance, Method m, String classPerm) {
-        Route r = m.getAnnotation(Route.class);
+    private RouteBinding bindRoute(Object instance, Method m, Route r, String classPerm) {
         String raw = r.value().trim();
         List<String> parts = raw.isEmpty() ? List.of() : List.of(raw.split("\\s+"));
 
@@ -403,14 +416,25 @@ public class CommandManager {
         }
 
         List<Param> params = new ArrayList<>();
+        boolean foundGreedy = false;
         for (Parameter rp : m.getParameters()) {
             boolean isSender = rp.isAnnotationPresent(Sender.class);
             Arg arg = rp.getAnnotation(Arg.class);
             OptionalArg opt = rp.getAnnotation(OptionalArg.class);
+            GreedyArg greedy = rp.getAnnotation(GreedyArg.class);
+
+            if (foundGreedy && !isSender) {
+                throw new IllegalStateException("@GreedyArg must be the last argument in the route on " + m);
+            }
+
             if (isSender) params.add(Param.sender(rp.getType()));
-            else if (arg != null) params.add(Param.required(rp.getType(), arg.value()));
-            else if (opt != null) params.add(Param.optional(rp.getType(), opt.value(), opt.defaultValue()));
-            else throw new IllegalStateException("Parameter missing @Sender/@Arg/@OptionalArg on " + m);
+            else if (greedy != null) {
+                foundGreedy = true;
+                params.add(Param.greedy(rp.getType(), greedy.value(), greedy.sanitize()));
+            }
+            else if (arg != null) params.add(Param.required(rp.getType(), arg.value(), arg.sanitize()));
+            else if (opt != null) params.add(Param.optional(rp.getType(), opt.value(), opt.defaultValue(), opt.sanitize()));
+            else throw new IllegalStateException("Parameter missing @Sender/@Arg/@OptionalArg/@GreedyArg on " + m);
         }
 
         String methodPerm = Optional.ofNullable(m.getAnnotation(Permission.class)).map(Permission::value).orElse(null);
@@ -430,10 +454,11 @@ public class CommandManager {
         }
     }
 
-    private record Param(boolean sender, boolean optional, Class<?> type, String name, Object defaultValue) {
-        static Param sender(Class<?> t) { return new Param(true, false, t, "", null); }
-        static Param required(Class<?> t, String n) { return new Param(false, false, t, n, null); }
-        static Param optional(Class<?> t, String n, Object def) { return new Param(false, true, t, n, def); }
+    private record Param(boolean sender, boolean optional, boolean sanitize, boolean greedy, Class<?> type, String name, Object defaultValue) {
+        static Param sender(Class<?> t) { return new Param(true, false, true, false, t, "", null); }
+        static Param required(Class<?> t, String n, boolean sanitize) { return new Param(false, false, sanitize, false, t, n, null); }
+        static Param greedy(Class<?> t, String n, boolean sanitize) { return new Param(false, false, sanitize, true, t, n, null); }
+        static Param optional(Class<?> t, String n, Object def, boolean sanitize) { return new Param(false, true, sanitize, false, t, n, def); }
     }
 
     private static class RouteBinding {

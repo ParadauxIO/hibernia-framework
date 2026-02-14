@@ -6,15 +6,22 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marks a method parameter as a required command argument.
+ * Marks a method parameter as a greedy command argument that consumes all remaining input.
  *
- * <p>Used by the CommandManager to bind a named placeholder from a route
- * (e.g. &lt;player&gt;) to a method parameter.</p>
+ * <p>Unlike {@link Arg}, which captures a single word, a greedy argument captures everything
+ * from its position to the end of the command string. This makes it suitable for arguments
+ * that may contain spaces or special characters, such as URLs or multi-word names.</p>
+ *
+ * <p><strong>Important:</strong> A {@code @GreedyArg} must be the last argument in the route,
+ * as it consumes all remaining input.</p>
  *
  * <p>Example:
  * <pre>
- * @Route("give &lt;player&gt; &lt;amount&gt;")
- * public void give(@Arg("player") OfflinePlayer player, @Arg("amount") int amount) { ... }
+ * &#064;Route("announce &lt;message&gt;")
+ * public void announce(@Sender Player sender, @GreedyArg("message") String message) { ... }
+ *
+ * &#064;Route("link &lt;url&gt;")
+ * public void link(@Sender Player sender, @GreedyArg(value = "url", sanitize = false) String url) { ... }
  * </pre>
  * </p>
  *
@@ -22,7 +29,7 @@ import java.lang.annotation.Target;
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.PARAMETER)
-public @interface Arg {
+public @interface GreedyArg {
     /**
      * The name of the argument as used in the route placeholder (without &lt;&gt;).
      *
