@@ -169,13 +169,13 @@ public class CommandManager {
 
         for (List<RouteBinding> group : routesByFirstSegment.values()) {
             for (RouteBinding b : group) {
-                addRoute(rootBuilder, b, 0, classPerm);
+                addRoute(rootBuilder, b, 0);
             }
         }
     }
 
     private void addRoute(LiteralArgumentBuilder<CommandSourceStack> parent,
-                          RouteBinding binding, int depth, String classPerm) {
+                          RouteBinding binding, int depth) {
         if (depth >= binding.path.size()) {
             parent.executes(ctx -> executeBinding(ctx, binding));
             return;
@@ -186,13 +186,13 @@ public class CommandManager {
         if (segment.literal) {
             LiteralArgumentBuilder<CommandSourceStack> literal = Commands.literal(segment.token);
 
-            if (depth == 0 && classPerm != null) {
-                literal.requires(src -> src.getSender().hasPermission(classPerm));
+            if (depth == 0 && binding.permission != null) {
+                literal.requires(src -> src.getSender().hasPermission(binding.permission));
             }
             if (depth == binding.path.size() - 1) {
                 literal.executes(ctx -> executeBinding(ctx, binding));
             } else {
-                addRoute(literal, binding, depth + 1, classPerm);
+                addRoute(literal, binding, depth + 1);
             }
             parent.then(literal);
         } else {
@@ -205,8 +205,8 @@ public class CommandManager {
             // Resolver-driven suggestions (with placeholder fallback)
             argBuilder.suggests(createArgumentSuggestionProvider(matchingParam));
 
-            if (depth == 0 && classPerm != null) {
-                argBuilder.requires(src -> src.getSender().hasPermission(classPerm));
+            if (depth == 0 && binding.permission != null) {
+                argBuilder.requires(src -> src.getSender().hasPermission(binding.permission));
             }
             if (depth == binding.path.size() - 1) {
                 argBuilder.executes(ctx -> executeBinding(ctx, binding));
@@ -232,7 +232,7 @@ public class CommandManager {
             if (depth == binding.path.size() - 1) {
                 literal.executes(ctx -> executeBinding(ctx, binding));
             } else {
-                addRoute(literal, binding, depth + 1, null);
+                addRoute(literal, binding, depth + 1);
             }
             parent.then(literal);
         } else {
