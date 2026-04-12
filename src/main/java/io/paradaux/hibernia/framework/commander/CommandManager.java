@@ -232,7 +232,7 @@ public class CommandManager {
             if (depth == binding.path.size() - 1) {
                 literal.executes(ctx -> executeBinding(ctx, binding));
             } else {
-                addRoute(literal, binding, depth + 1);
+                addRoute(literal, binding, depth + 1, null);
             }
             parent.then(literal);
         } else {

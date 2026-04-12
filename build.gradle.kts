@@ -43,6 +43,21 @@ dependencies {
     annotationProcessor("org.projectlombok:lombok:1.18.34")
     testCompileOnly("org.projectlombok:lombok:1.18.34")
     testAnnotationProcessor("org.projectlombok:lombok:1.18.34")
+
+    // Testing
+    testImplementation("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testImplementation("org.mockito:mockito-core:5.14.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.withType<JavaCompile> {
+    options.encoding = "UTF-8"
+}
+
+tasks.test {
+    useJUnitPlatform()
+    systemProperty("file.encoding", "UTF-8")
 }
 
 /**
