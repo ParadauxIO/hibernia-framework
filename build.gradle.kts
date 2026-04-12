@@ -1,6 +1,7 @@
 plugins {
     `java-library`
     `maven-publish`
+    jacoco
     id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
@@ -58,6 +59,20 @@ tasks.withType<JavaCompile> {
 tasks.test {
     useJUnitPlatform()
     systemProperty("file.encoding", "UTF-8")
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+jacoco {
+    toolVersion = "0.8.12"
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
 }
 
 /**
