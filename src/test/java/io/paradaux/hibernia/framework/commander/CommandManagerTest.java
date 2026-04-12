@@ -241,7 +241,8 @@ class CommandManagerTest {
         Object[] args = invokeExtractArguments(context, binding, mock(CommandSender.class));
 
         assertEquals(1, args.length);
-        assertEquals("7", args[0]);
+        assertTrue(args[0] instanceof Integer);
+        assertEquals(7, args[0]);
     }
 
     @Test
