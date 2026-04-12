@@ -764,7 +764,7 @@ class CommandManagerTest {
     Object[] args = invokeExtractArguments(context, binding, mock(CommandSender.class));
 
     assertEquals(1, args.length);
-    assertEquals("5", args[0]);
+    assertEquals(5, args[0]);
     }
 
     @Test
