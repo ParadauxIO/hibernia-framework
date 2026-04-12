@@ -169,13 +169,13 @@ public class CommandManager {
 
         for (List<RouteBinding> group : routesByFirstSegment.values()) {
             for (RouteBinding b : group) {
-                addRoute(rootBuilder, b, 0);
+                addRoute(rootBuilder, b, 0, classPerm);
             }
         }
     }
 
     private void addRoute(LiteralArgumentBuilder<CommandSourceStack> parent,
-                          RouteBinding binding, int depth) {
+                          RouteBinding binding, int depth, String classPerm) {
         if (depth >= binding.path.size()) {
             parent.executes(ctx -> executeBinding(ctx, binding));
             return;
@@ -186,14 +186,13 @@ public class CommandManager {
         if (segment.literal) {
             LiteralArgumentBuilder<CommandSourceStack> literal = Commands.literal(segment.token);
 
-            // Gate permission on the first node so the entire subtree is hidden
-            if (depth == 0 && binding.permission != null) {
-                literal.requires(src -> src.getSender().hasPermission(binding.permission));
+            if (depth == 0 && classPerm != null) {
+                literal.requires(src -> src.getSender().hasPermission(classPerm));
             }
             if (depth == binding.path.size() - 1) {
                 literal.executes(ctx -> executeBinding(ctx, binding));
             } else {
-                addRoute(literal, binding, depth + 1);
+                addRoute(literal, binding, depth + 1, classPerm);
             }
             parent.then(literal);
         } else {
@@ -206,9 +205,8 @@ public class CommandManager {
             // Resolver-driven suggestions (with placeholder fallback)
             argBuilder.suggests(createArgumentSuggestionProvider(matchingParam));
 
-            // Gate permission on the first node so the entire subtree is hidden
-            if (depth == 0 && binding.permission != null) {
-                argBuilder.requires(src -> src.getSender().hasPermission(binding.permission));
+            if (depth == 0 && classPerm != null) {
+                argBuilder.requires(src -> src.getSender().hasPermission(classPerm));
             }
             if (depth == binding.path.size() - 1) {
                 argBuilder.executes(ctx -> executeBinding(ctx, binding));
