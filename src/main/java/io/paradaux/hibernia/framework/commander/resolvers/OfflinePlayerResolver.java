@@ -16,7 +16,17 @@ public class OfflinePlayerResolver implements ParameterResolver<OfflinePlayer> {
     }
 
     public Optional<OfflinePlayer> resolve(String token, CommandSender sender) {
-        return Optional.ofNullable(Bukkit.getOfflinePlayerIfCached(token));
+        // Always return a non-null OfflinePlayer so the handler can decide
+        // how to render an unknown-player rejection (typically a check on
+        // hasPlayedBefore() with a plugin-specific i18n message). Returning
+        // empty here would short-circuit dispatch with the framework's
+        // generic "Invalid target: X" before the handler runs, which makes
+        // plugin-side null/has-played-before checks unreachable.
+        OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(token);
+        if (cached != null) return Optional.of(cached);
+        @SuppressWarnings("deprecation") // synthetic OfflinePlayer for a never-joined name; safe on offline-mode servers
+        OfflinePlayer synthetic = Bukkit.getOfflinePlayer(token);
+        return Optional.of(synthetic);
     }
 
     public List<String> suggestions(String prefix, CommandSender sender) {
