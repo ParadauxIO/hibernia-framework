@@ -15,6 +15,7 @@ import io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import io.paradaux.hibernia.framework.commander.annotations.*;
 import io.paradaux.hibernia.framework.commander.resolvers.BigDecimalResolver;
+import io.paradaux.hibernia.framework.commander.resolvers.BooleanResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.IntegerResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.LongResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.OfflinePlayerResolver;
@@ -98,6 +99,7 @@ public class CommandManager {
         registerResolver(new IntegerResolver());
         registerResolver(new LongResolver());
         registerResolver(new BigDecimalResolver());
+        registerResolver(new BooleanResolver());
         registerResolver(new OfflinePlayerResolver());
     }
 
@@ -353,6 +355,19 @@ public class CommandManager {
                         } else {
                             @SuppressWarnings("unchecked")
                             ParameterResolver<Object> resolver = (ParameterResolver<Object>) resolvers.get(param.type);
+                            // Primitive params don't match wrapper-keyed resolvers
+                            // out of the box; transparently fall back to the
+                            // wrapper resolver so handlers can declare
+                            // `boolean flag` (etc.) as naturally as `Boolean flag`.
+                            if (resolver == null) {
+                                Class<?> wrapper = primitiveWrapper(param.type);
+                                if (wrapper != null) {
+                                    @SuppressWarnings("unchecked")
+                                    ParameterResolver<Object> wrappedResolver =
+                                            (ParameterResolver<Object>) resolvers.get(wrapper);
+                                    resolver = wrappedResolver;
+                                }
+                            }
 
                             if (resolver != null) {
                                 String stringValue = rawValue.toString();
@@ -396,6 +411,25 @@ public class CommandManager {
 
     private void registerResolver(ParameterResolver<?> r) {
         resolvers.putIfAbsent(r.type(), r);
+    }
+
+    /**
+     * Map Java primitive {@code Class} tokens to their boxed counterparts so a
+     * resolver registered against, e.g., {@code Boolean.class} also services
+     * handler params declared as {@code boolean}. Returns {@code null} for
+     * non-primitive inputs.
+     */
+    private static Class<?> primitiveWrapper(Class<?> primitive) {
+        if (!primitive.isPrimitive()) return null;
+        if (primitive == boolean.class) return Boolean.class;
+        if (primitive == int.class)     return Integer.class;
+        if (primitive == long.class)    return Long.class;
+        if (primitive == double.class)  return Double.class;
+        if (primitive == float.class)   return Float.class;
+        if (primitive == short.class)   return Short.class;
+        if (primitive == byte.class)    return Byte.class;
+        if (primitive == char.class)    return Character.class;
+        return null;
     }
 
     private void safeMsg(CommandSender sender, String msg) {
