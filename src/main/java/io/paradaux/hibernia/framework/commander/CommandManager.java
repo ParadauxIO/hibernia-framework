@@ -3,6 +3,7 @@ package io.paradaux.hibernia.framework.commander;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
@@ -15,6 +16,7 @@ import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import io.paradaux.hibernia.framework.commander.annotations.*;
 import io.paradaux.hibernia.framework.commander.resolvers.BigDecimalResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.IntegerResolver;
+import io.paradaux.hibernia.framework.commander.resolvers.LongResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.OfflinePlayerResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.StringResolver;
 import io.paradaux.hibernia.framework.commander.spi.CommandHandler;
@@ -94,6 +96,7 @@ public class CommandManager {
         // Built-ins
         registerResolver(new StringResolver());
         registerResolver(new IntegerResolver());
+        registerResolver(new LongResolver());
         registerResolver(new BigDecimalResolver());
         registerResolver(new OfflinePlayerResolver());
     }
@@ -256,6 +259,8 @@ public class CommandManager {
     private RequiredArgumentBuilder<CommandSourceStack, ?> createArgumentBuilder(String name, Param param) {
         if (param.type == Integer.class || param.type == int.class) {
             return Commands.argument(name, IntegerArgumentType.integer());
+        } else if (param.type == Long.class || param.type == long.class) {
+            return Commands.argument(name, LongArgumentType.longArg());
         } else if (param.greedy) {
             return Commands.argument(name, StringArgumentType.greedyString());
         } else if (param.type == BigDecimal.class) {
@@ -353,7 +358,10 @@ public class CommandManager {
                                 String stringValue = rawValue.toString();
                                 values.add(resolver.resolve(stringValue, sender)
                                         .orElseThrow(() -> new IllegalArgumentException("Invalid " + param.name + ": " + stringValue)));
-                            } else if (param.type == Integer.class || param.type == int.class) {
+                            } else if (param.type == Integer.class || param.type == int.class
+                                    || param.type == Long.class || param.type == long.class) {
+                                // Brigadier's Integer/Long arg types deliver the
+                                // already-typed value; pass through.
                                 values.add(rawValue);
                             } else {
                                 values.add(rawValue.toString());
