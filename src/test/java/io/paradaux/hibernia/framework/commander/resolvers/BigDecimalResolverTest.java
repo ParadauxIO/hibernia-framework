@@ -92,4 +92,23 @@ class BigDecimalResolverTest {
         Optional<BigDecimal> result = resolver.resolve("12abc", sender);
         assertTrue(result.isEmpty());
     }
+
+    // Live-server regression 2026-05-16: an admin typed `/fine issue p 19,993 …`
+    // (formatted-style amount with a thousands-separator) and got an unrelated
+    // "unknown player" error because BigDecimal(String) rejects commas. The
+    // resolver now strips commas before parsing — treating them unconditionally
+    // as thousands separators.
+    @Test
+    void resolve_thousandsSeparatorComma_isStripped() {
+        Optional<BigDecimal> result = resolver.resolve("19,993", sender);
+        assertTrue(result.isPresent());
+        assertEquals(new BigDecimal("19993"), result.get());
+    }
+
+    @Test
+    void resolve_multipleThousandsSeparators_areStripped() {
+        Optional<BigDecimal> result = resolver.resolve("1,234,567.89", sender);
+        assertTrue(result.isPresent());
+        assertEquals(new BigDecimal("1234567.89"), result.get());
+    }
 }
