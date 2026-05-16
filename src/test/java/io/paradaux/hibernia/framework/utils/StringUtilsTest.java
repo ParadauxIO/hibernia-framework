@@ -103,6 +103,13 @@ class StringUtilsTest {
     }
 
     @Test
+    void sanitize_hyphenAndPeriodPreserved() {
+        assertEquals("starting-balances", StringUtils.sanitize("starting-balances"));
+        assertEquals("v1.2.3", StringUtils.sanitize("v1.2.3"));
+        assertEquals("foo-bar.baz_qux", StringUtils.sanitize("foo-bar.baz_qux"));
+    }
+
+    @Test
     void sanitize_miniMessageColorTag_removedButTextPreserved() {
         assertEquals("Hello", StringUtils.sanitize("<color:#FF0000>Hello</color>"));
     }
