@@ -9,6 +9,7 @@ import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
+import io.paradaux.hibernia.framework.commander.arguments.BigDecimalArgumentType;
 import io.paradaux.hibernia.framework.commander.annotations.Arg;
 import io.paradaux.hibernia.framework.commander.annotations.Async;
 import io.paradaux.hibernia.framework.commander.annotations.Command;
@@ -604,7 +605,7 @@ class CommandManagerTest {
     }
 
     @Test
-    void createArgumentBuilder_bigDecimalUsesWordType() throws Exception {
+    void createArgumentBuilder_bigDecimalUsesBigDecimalType() throws Exception {
         Object priceBinding = invokeBindRoute(handler,
                 TestHandler.class.getDeclaredMethod("price", BigDecimal.class),
                 "price <amount>", null);
@@ -615,7 +616,7 @@ class CommandManagerTest {
 
         Object arg = create.invoke(manager, "amount", amountParam);
         assertTrue(arg instanceof RequiredArgumentBuilder<?, ?>);
-        assertTrue(((RequiredArgumentBuilder<?, ?>) arg).getType() instanceof StringArgumentType);
+        assertTrue(((RequiredArgumentBuilder<?, ?>) arg).getType() instanceof BigDecimalArgumentType);
     }
 
     @Test
