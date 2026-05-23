@@ -25,8 +25,11 @@ public class StringUtils {
         // 1) Remove MiniMessage components <...>
         String noMini = input.replaceAll(MM_TAG_REGEX, "");
 
-        // 2) Keep letters, digits, whitespace, and underscore
-        String clean = noMini.replaceAll("[^\\p{IsAlphabetic}\\p{IsDigit}\\s_]", "");
+        // 2) Keep letters, digits, whitespace, and identifier-friendly punctuation
+        // (underscore, hyphen, period). Hyphens are valid in primitive government
+        // account names like "starting-balances"; periods appear in versioned
+        // identifiers. None pose the injection risk MiniMessage tags do.
+        String clean = noMini.replaceAll("[^\\p{IsAlphabetic}\\p{IsDigit}\\s_.\\-]", "");
 
         // 3) Collapse multiple spaces and trim
         return clean.trim().replaceAll("\\s{2,}", " ");

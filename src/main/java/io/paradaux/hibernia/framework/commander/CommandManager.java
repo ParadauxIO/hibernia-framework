@@ -3,6 +3,7 @@ package io.paradaux.hibernia.framework.commander;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
@@ -13,8 +14,11 @@ import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import io.paradaux.hibernia.framework.commander.annotations.*;
+import io.paradaux.hibernia.framework.commander.arguments.BigDecimalArgumentType;
 import io.paradaux.hibernia.framework.commander.resolvers.BigDecimalResolver;
+import io.paradaux.hibernia.framework.commander.resolvers.BooleanResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.IntegerResolver;
+import io.paradaux.hibernia.framework.commander.resolvers.LongResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.OfflinePlayerResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.StringResolver;
 import io.paradaux.hibernia.framework.commander.spi.CommandHandler;
@@ -94,7 +98,9 @@ public class CommandManager {
         // Built-ins
         registerResolver(new StringResolver());
         registerResolver(new IntegerResolver());
+        registerResolver(new LongResolver());
         registerResolver(new BigDecimalResolver());
+        registerResolver(new BooleanResolver());
         registerResolver(new OfflinePlayerResolver());
     }
 
@@ -169,13 +175,13 @@ public class CommandManager {
 
         for (List<RouteBinding> group : routesByFirstSegment.values()) {
             for (RouteBinding b : group) {
-                addRoute(rootBuilder, b, 0);
+                addRoute(rootBuilder, b, 0, classPerm);
             }
         }
     }
 
     private void addRoute(LiteralArgumentBuilder<CommandSourceStack> parent,
-                          RouteBinding binding, int depth) {
+                          RouteBinding binding, int depth, String classPerm) {
         if (depth >= binding.path.size()) {
             parent.executes(ctx -> executeBinding(ctx, binding));
             return;
@@ -186,14 +192,13 @@ public class CommandManager {
         if (segment.literal) {
             LiteralArgumentBuilder<CommandSourceStack> literal = Commands.literal(segment.token);
 
-            // Gate permission on the first node so the entire subtree is hidden
-            if (depth == 0 && binding.permission != null) {
-                literal.requires(src -> src.getSender().hasPermission(binding.permission));
+            if (depth == 0 && classPerm != null) {
+                literal.requires(src -> src.getSender().hasPermission(classPerm));
             }
             if (depth == binding.path.size() - 1) {
                 literal.executes(ctx -> executeBinding(ctx, binding));
             } else {
-                addRoute(literal, binding, depth + 1);
+                addRoute(literal, binding, depth + 1, classPerm);
             }
             parent.then(literal);
         } else {
@@ -206,9 +211,8 @@ public class CommandManager {
             // Resolver-driven suggestions (with placeholder fallback)
             argBuilder.suggests(createArgumentSuggestionProvider(matchingParam));
 
-            // Gate permission on the first node so the entire subtree is hidden
-            if (depth == 0 && binding.permission != null) {
-                argBuilder.requires(src -> src.getSender().hasPermission(binding.permission));
+            if (depth == 0 && classPerm != null) {
+                argBuilder.requires(src -> src.getSender().hasPermission(classPerm));
             }
             if (depth == binding.path.size() - 1) {
                 argBuilder.executes(ctx -> executeBinding(ctx, binding));
@@ -234,7 +238,7 @@ public class CommandManager {
             if (depth == binding.path.size() - 1) {
                 literal.executes(ctx -> executeBinding(ctx, binding));
             } else {
-                addRoute(literal, binding, depth + 1);
+                addRoute(literal, binding, depth + 1, null);
             }
             parent.then(literal);
         } else {
@@ -258,10 +262,12 @@ public class CommandManager {
     private RequiredArgumentBuilder<CommandSourceStack, ?> createArgumentBuilder(String name, Param param) {
         if (param.type == Integer.class || param.type == int.class) {
             return Commands.argument(name, IntegerArgumentType.integer());
+        } else if (param.type == Long.class || param.type == long.class) {
+            return Commands.argument(name, LongArgumentType.longArg());
         } else if (param.greedy) {
             return Commands.argument(name, StringArgumentType.greedyString());
         } else if (param.type == BigDecimal.class) {
-            return Commands.argument(name, StringArgumentType.word());
+            return Commands.argument(name, BigDecimalArgumentType.bigDecimal());
         } else {
             return Commands.argument(name, StringArgumentType.word());
         }
@@ -350,12 +356,28 @@ public class CommandManager {
                         } else {
                             @SuppressWarnings("unchecked")
                             ParameterResolver<Object> resolver = (ParameterResolver<Object>) resolvers.get(param.type);
+                            // Primitive params don't match wrapper-keyed resolvers
+                            // out of the box; transparently fall back to the
+                            // wrapper resolver so handlers can declare
+                            // `boolean flag` (etc.) as naturally as `Boolean flag`.
+                            if (resolver == null) {
+                                Class<?> wrapper = primitiveWrapper(param.type);
+                                if (wrapper != null) {
+                                    @SuppressWarnings("unchecked")
+                                    ParameterResolver<Object> wrappedResolver =
+                                            (ParameterResolver<Object>) resolvers.get(wrapper);
+                                    resolver = wrappedResolver;
+                                }
+                            }
 
                             if (resolver != null) {
                                 String stringValue = rawValue.toString();
                                 values.add(resolver.resolve(stringValue, sender)
                                         .orElseThrow(() -> new IllegalArgumentException("Invalid " + param.name + ": " + stringValue)));
-                            } else if (param.type == Integer.class || param.type == int.class) {
+                            } else if (param.type == Integer.class || param.type == int.class
+                                    || param.type == Long.class || param.type == long.class) {
+                                // Brigadier's Integer/Long arg types deliver the
+                                // already-typed value; pass through.
                                 values.add(rawValue);
                             } else {
                                 values.add(rawValue.toString());
@@ -390,6 +412,25 @@ public class CommandManager {
 
     private void registerResolver(ParameterResolver<?> r) {
         resolvers.putIfAbsent(r.type(), r);
+    }
+
+    /**
+     * Map Java primitive {@code Class} tokens to their boxed counterparts so a
+     * resolver registered against, e.g., {@code Boolean.class} also services
+     * handler params declared as {@code boolean}. Returns {@code null} for
+     * non-primitive inputs.
+     */
+    private static Class<?> primitiveWrapper(Class<?> primitive) {
+        if (!primitive.isPrimitive()) return null;
+        if (primitive == boolean.class) return Boolean.class;
+        if (primitive == int.class)     return Integer.class;
+        if (primitive == long.class)    return Long.class;
+        if (primitive == double.class)  return Double.class;
+        if (primitive == float.class)   return Float.class;
+        if (primitive == short.class)   return Short.class;
+        if (primitive == byte.class)    return Byte.class;
+        if (primitive == char.class)    return Character.class;
+        return null;
     }
 
     private void safeMsg(CommandSender sender, String msg) {
