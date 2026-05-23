@@ -14,6 +14,7 @@ import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import io.paradaux.hibernia.framework.commander.annotations.*;
+import io.paradaux.hibernia.framework.commander.arguments.BigDecimalArgumentType;
 import io.paradaux.hibernia.framework.commander.resolvers.BigDecimalResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.BooleanResolver;
 import io.paradaux.hibernia.framework.commander.resolvers.IntegerResolver;
@@ -266,7 +267,7 @@ public class CommandManager {
         } else if (param.greedy) {
             return Commands.argument(name, StringArgumentType.greedyString());
         } else if (param.type == BigDecimal.class) {
-            return Commands.argument(name, StringArgumentType.word());
+            return Commands.argument(name, BigDecimalArgumentType.bigDecimal());
         } else {
             return Commands.argument(name, StringArgumentType.word());
         }
