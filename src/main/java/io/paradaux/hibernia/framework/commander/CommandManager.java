@@ -24,7 +24,9 @@ import io.paradaux.hibernia.framework.commander.resolvers.StringResolver;
 import io.paradaux.hibernia.framework.commander.spi.CommandHandler;
 import io.paradaux.hibernia.framework.commander.spi.ParameterResolver;
 import lombok.extern.slf4j.Slf4j;
+import org.bukkit.command.CommandMap;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.PluginIdentifiableCommand;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -145,7 +147,76 @@ public class CommandManager {
             }
 
             roots.values().forEach(b -> commands.register(b.build()));
+
+            // Claim each registered label with a PluginIdentifiableCommand so that
+            // plugins which resolve command conflicts by owner (e.g. EssentialsX)
+            // can attribute the label to us and yield priority. Paper's Brigadier
+            // wrappers are not PluginIdentifiableCommand, so without this our
+            // commands look unowned and EssentialsX keeps its own versions.
+            installPriorityCommands(roots.keySet());
         });
+    }
+
+    /**
+     * Force each given label in the server command map to resolve to a
+     * {@link PluginIdentifiableCommand} owned by this plugin. Execution forwards
+     * to the Brigadier command registered under the plugin's namespace
+     * ({@code <namespace>:<label>}), so the rich Brigadier tree still does the
+     * actual work — this wrapper exists only so conflict handlers in other
+     * plugins can see that the label belongs to us.
+     *
+     * <p>This is what makes a hibernia plugin authoritative over its own command
+     * names against EssentialsX, whose {@code AlternativeCommandsHandler} only
+     * defers to commands it can identify via {@link PluginIdentifiableCommand}.</p>
+     */
+    private void installPriorityCommands(Set<String> labels) {
+        final CommandMap map = plugin.getServer().getCommandMap();
+        if (map == null) {
+            plugin.getLogger().warning("No command map available; skipping command-priority install.");
+            return;
+        }
+        final Map<String, org.bukkit.command.Command> known = map.getKnownCommands();
+        for (String label : labels) {
+            String key = label.toLowerCase(Locale.ROOT);
+            known.put(key, new ForwardingPluginCommand(key, plugin));
+        }
+    }
+
+    /**
+     * Legacy {@link org.bukkit.command.Command} tagged as
+     * {@link PluginIdentifiableCommand} so its owning plugin is discoverable.
+     * Execution and tab-completion are delegated to the namespaced Brigadier
+     * command ({@code <namespace>:<label>}) registered by {@link #registerAll()}.
+     */
+    private static final class ForwardingPluginCommand
+            extends org.bukkit.command.Command implements PluginIdentifiableCommand {
+
+        private final Plugin owner;
+        private final String target;
+
+        ForwardingPluginCommand(String label, Plugin owner) {
+            super(label);
+            this.owner = owner;
+            this.target = owner.getName().toLowerCase(Locale.ROOT) + ":" + label;
+        }
+
+        @Override
+        public Plugin getPlugin() {
+            return owner;
+        }
+
+        @Override
+        public boolean execute(CommandSender sender, String commandLabel, String[] args) {
+            String line = args.length == 0 ? target : target + " " + String.join(" ", args);
+            return owner.getServer().dispatchCommand(sender, line);
+        }
+
+        @Override
+        public List<String> tabComplete(CommandSender sender, String alias, String[] args) {
+            // Client-side completions come from the Brigadier node registered for
+            // the bare label; nothing to add from the legacy path.
+            return Collections.emptyList();
+        }
     }
 
     private void buildCommandTree(LiteralArgumentBuilder<CommandSourceStack> rootBuilder,
