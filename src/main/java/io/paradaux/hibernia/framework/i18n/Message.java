@@ -93,8 +93,12 @@ public final class Message {
             throw new IllegalStateException("Could not create plugin data folder: " + dir);
         }
 
-//        if (!Files.exists(file))
-            plugin.saveResource("messages.properties", true);
+        // Only write the bundled default when the operator has no file yet —
+        // saveResource(..., true) would overwrite operator-edited messages on
+        // every boot. replace=false is also passed as belt-and-suspenders.
+        if (!Files.exists(file)) {
+            plugin.saveResource("messages.properties", false);
+        }
     }
 
     public synchronized void reload() {

@@ -385,13 +385,13 @@ public class CommandManager {
                         }
                     } catch (IllegalArgumentException e) {
                         if (param.optional) {
-                            values.add(param.defaultValue);
+                            values.add(resolveDefault(param.type, param.defaultValue, param.name, sender));
                         } else {
                             throw e;
                         }
                     }
                 } else if (param.optional) {
-                    values.add(param.defaultValue);
+                    values.add(resolveDefault(param.type, param.defaultValue, param.name, sender));
                 } else {
                     throw new IllegalArgumentException("Missing required argument: " + param.name);
                 }
@@ -420,6 +420,43 @@ public class CommandManager {
      * handler params declared as {@code boolean}. Returns {@code null} for
      * non-primitive inputs.
      */
+    /**
+     * Convert an optional/greedy arg's default (a raw String from the annotation)
+     * to the parameter's declared type, the same way a live argument is resolved.
+     * Without this the raw String was handed straight to {@code Method.invoke},
+     * which throws {@code argument type mismatch} for any non-String param (int,
+     * BigDecimal, …) the moment the default is actually used.
+     */
+    @SuppressWarnings("unchecked")
+    private Object resolveDefault(Class<?> type, Object defaultValueObj, String name, CommandSender sender) throws Exception {
+        if (defaultValueObj == null || type == String.class) {
+            return defaultValueObj;
+        }
+        String defaultValue = defaultValueObj.toString();
+        ParameterResolver<Object> resolver = (ParameterResolver<Object>) resolvers.get(type);
+        if (resolver == null) {
+            Class<?> wrapper = primitiveWrapper(type);
+            if (wrapper != null) {
+                resolver = (ParameterResolver<Object>) resolvers.get(wrapper);
+            }
+        }
+        if (resolver != null) {
+            return resolver.resolve(defaultValue, sender).orElseThrow(() ->
+                    new IllegalArgumentException("Invalid default for " + name + ": " + defaultValue));
+        }
+        // No resolver registered for this type (Brigadier supplies Integer/Long
+        // typed for live args); parse the default to match the declared type.
+        try {
+            if (type == Integer.class || type == int.class) return Integer.parseInt(defaultValue);
+            if (type == Long.class || type == long.class)   return Long.parseLong(defaultValue);
+            if (type == Double.class || type == double.class) return Double.parseDouble(defaultValue);
+            if (type == Boolean.class || type == boolean.class) return Boolean.parseBoolean(defaultValue);
+        } catch (NumberFormatException ignored) {
+            // fall through to the raw string
+        }
+        return defaultValue;
+    }
+
     private static Class<?> primitiveWrapper(Class<?> primitive) {
         if (!primitive.isPrimitive()) return null;
         if (primitive == boolean.class) return Boolean.class;

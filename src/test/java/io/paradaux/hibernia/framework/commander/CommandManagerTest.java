@@ -242,7 +242,9 @@ class CommandManagerTest {
         Object[] args = invokeExtractArguments(context, binding, mock(CommandSender.class));
 
         assertEquals(1, args.length);
-        assertEquals("7", args[0]);
+        // The default must be resolved to the parameter's declared type (int),
+        // not handed to Method.invoke as the raw annotation String "7".
+        assertEquals(7, args[0]);
     }
 
     @Test
@@ -765,7 +767,8 @@ class CommandManagerTest {
     Object[] args = invokeExtractArguments(context, binding, mock(CommandSender.class));
 
     assertEquals(1, args.length);
-    assertEquals("5", args[0]);
+    // Default resolved to the declared int type, not the raw annotation String.
+    assertEquals(5, args[0]);
     }
 
     @Test
