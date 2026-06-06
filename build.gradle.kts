@@ -7,7 +7,7 @@ plugins {
 
 group = "io.paradaux"
 version = providers.gradleProperty("version")
-    .orElse("1.0.1-SNAPSHOT")
+    .orElse("1.0.2-SNAPSHOT")
     .get()
 
 java {
