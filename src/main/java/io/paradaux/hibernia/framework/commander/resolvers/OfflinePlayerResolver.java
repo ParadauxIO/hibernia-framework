@@ -16,17 +16,18 @@ public class OfflinePlayerResolver implements ParameterResolver<OfflinePlayer> {
     }
 
     public Optional<OfflinePlayer> resolve(String token, CommandSender sender) {
-        // Always return a non-null OfflinePlayer so the handler can decide
-        // how to render an unknown-player rejection (typically a check on
-        // hasPlayedBefore() with a plugin-specific i18n message). Returning
-        // empty here would short-circuit dispatch with the framework's
-        // generic "Invalid target: X" before the handler runs, which makes
-        // plugin-side null/has-played-before checks unreachable.
-        OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(token);
-        if (cached != null) return Optional.of(cached);
-        @SuppressWarnings("deprecation") // synthetic OfflinePlayer for a never-joined name; safe on offline-mode servers
-        OfflinePlayer synthetic = Bukkit.getOfflinePlayer(token);
-        return Optional.of(synthetic);
+        // Resolve from the local player cache ONLY. We deliberately do NOT fall back
+        // to Bukkit.getOfflinePlayer(String): on an online-mode server that blocks on
+        // a Mojang lookup, which FAILS for Bedrock/Floodgate players (their
+        // '.'-prefixed names aren't in Mojang's DB) and fabricates a bogus UUID that
+        // is NOT the player's real Floodgate UUID — a command acting on it writes
+        // ghost rows (e.g. employing someone who never actually gets employed).
+        //
+        // An uncached name resolves to empty, so the framework rejects it as an
+        // unknown target and no handler ever acts on a fabricated UUID. A Bedrock (or
+        // Java) player who has joined before is in the cache under their real name and
+        // resolves correctly.
+        return Optional.ofNullable(Bukkit.getOfflinePlayerIfCached(token));
     }
 
     public List<String> suggestions(String prefix, CommandSender sender) {
