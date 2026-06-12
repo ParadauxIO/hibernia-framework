@@ -20,6 +20,25 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Templated messaging over a {@code messages.properties} file with MiniMessage
+ * formatting and {@code {placeholder}} substitution.
+ *
+ * <p>Placeholders resolve in order: caller-supplied values, then
+ * {@code <namespace>.placeholder.*} keys, then global {@code placeholder.*}
+ * keys; expansion is recursive (bounded) so placeholders can reference each
+ * other.</p>
+ *
+ * <p><strong>Caller-supplied values are inert by default:</strong> MiniMessage
+ * tags in a value are escaped (rendered literally) and braces in a value are
+ * never re-expanded, so player-controlled strings cannot inject markup or
+ * recurse into other placeholders. To deliberately pass markup through a value
+ * — e.g. a pre-formatted amount — wrap it with {@link #rich(String)}.</p>
+ *
+ * <p>This is a single-file template system, not full internationalisation:
+ * there is one {@code messages.properties} per plugin and no per-player locale
+ * selection (yet).</p>
+ */
 @Slf4j
 @Singleton
 public final class Message {
@@ -45,6 +64,23 @@ public final class Message {
         reload();
     }
 
+    /**
+     * Mark a placeholder value as trusted MiniMessage markup: it is substituted
+     * verbatim (tags parsed, braces expandable) instead of being escaped.
+     * Only use for values the operator controls — never for raw player input.
+     */
+    public static Rich rich(String value) {
+        return new Rich(Objects.requireNonNull(value));
+    }
+
+    /** Wrapper marking a placeholder value as trusted markup. See {@link #rich(String)}. */
+    public record Rich(String value) {
+        @Override
+        public String toString() {
+            return value;
+        }
+    }
+
     public String format(String key, Object... kvPairs) {
         return format(key, kvToMap(kvPairs));
     }
@@ -57,15 +93,28 @@ public final class Message {
         return mm.deserialize(format(key, values));
     }
 
+    /**
+     * Render {@code key} when it exists in the messages file, otherwise render
+     * the given MiniMessage {@code fallbackPattern} through the same placeholder
+     * pipeline. Used by the framework to give every built-in message an
+     * operator-overridable key without requiring it in every plugin's file.
+     */
+    public Component componentOr(String key, String fallbackPattern, Object... kvPairs) {
+        return componentOr(key, fallbackPattern, kvToMap(kvPairs));
+    }
+
+    public Component componentOr(String key, String fallbackPattern, Map<String, ?> values) {
+        String pattern = props.getProperty(key);
+        if (pattern == null) pattern = fallbackPattern;
+        return mm.deserialize(formatPattern(pattern, namespaceOf(key), values));
+    }
+
     public void send(CommandSender to, String key, Object... kvPairs) {
         to.sendMessage(component(key, kvPairs));
     }
 
     public void send(HiberniaPlayer to, String key, Object... kvPairs) {
-        Player player = Bukkit.getPlayer(to.getCurrentName());
-        if (player != null) {
-            send(player, key, kvPairs);
-        }
+        send(to.getUniqueId(), key, kvPairs);
     }
 
     public void send(UUID to, String key, Object... kvPairs) {
@@ -86,7 +135,6 @@ public final class Message {
         Bukkit.getConsoleSender().sendMessage(msg);
     }
 
-    @SuppressWarnings("ignored")
     private void ensureDefaultFile() {
         File dir = plugin.getDataFolder();
         if (!dir.exists() && !dir.mkdirs()) {
@@ -160,13 +208,15 @@ public final class Message {
 
     /** Expand {name} using: user values -> ns placeholders -> global placeholders; recursively. */
     public String format(String key, Map<String, ?> values) {
-        String pattern = raw(key);
+        return formatPattern(raw(key), namespaceOf(key), values);
+    }
+
+    private String formatPattern(String pattern, String ns, Map<String, ?> values) {
         // escape literal braces
         pattern = pattern.replace("{{", LBR).replace("}}", RBR);
 
         // merged resolvers for this key
         Map<String,String> resolved = new LinkedHashMap<>();
-        String ns = namespaceOf(key);
         if (!globalPh.isEmpty()) resolved.putAll(globalPh);
         Map<String,String> nsMap = nsPh.get(ns);
         if (nsMap != null) resolved.putAll(nsMap);
@@ -174,7 +224,7 @@ public final class Message {
         if (values != null) {
             for (var e : values.entrySet()) {
                 if (e.getKey() != null && e.getValue() != null) {
-                    resolved.put(e.getKey(), Objects.toString(e.getValue()));
+                    resolved.put(e.getKey(), renderValue(e.getValue()));
                 }
             }
         }
@@ -183,6 +233,19 @@ public final class Message {
 
         // restore literal braces
         return out.replace(LBR, "{").replace(RBR, "}");
+    }
+
+    /**
+     * Caller-supplied values are inert unless wrapped in {@link Rich}: tags are
+     * escaped so they render literally, and braces are sentinel-encoded so a
+     * value like "{prefix}" can't trigger another round of expansion.
+     */
+    private String renderValue(Object value) {
+        if (value instanceof Rich rich) {
+            return rich.value();
+        }
+        String s = Objects.toString(value);
+        return mm.escapeTags(s).replace("{", LBR).replace("}", RBR);
     }
 
     private String expandString(String input, Map<String,String> primary, Map<String,String> secondary, int depth) {

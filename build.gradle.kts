@@ -2,7 +2,7 @@ plugins {
     `java-library`
     `maven-publish`
     jacoco
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("com.gradleup.shadow") version "9.0.2"
 }
 
 group = "io.paradaux"
@@ -31,10 +31,10 @@ dependencies {
     // Paper & MC-Specific dependencies
     compileOnly("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
 
-    // DI
-    implementation("com.google.inject:guice:7.0.0")
+    // DI — api, not implementation: the public surface exposes Guice types
+    // (HiberniaModule extends AbstractModule, CommandManager takes an Injector).
+    api("com.google.inject:guice:7.0.0")
     implementation("com.google.guava:guava:33.2.1-jre")
-    implementation("javax.inject:javax.inject:1")
 
     // Configurator
     implementation("org.reflections:reflections:0.10.2")

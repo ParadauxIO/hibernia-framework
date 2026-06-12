@@ -98,7 +98,7 @@ class MessageTest {
     }
 
     @Test
-    void send_hiberniaPlayerAndUuid_routesThroughBukkitPlayerLookup() throws Exception {
+    void send_hiberniaPlayerAndUuid_resolveByUuid() throws Exception {
         writeMessages("chat=Hello {name}");
         stubSaveResourceNoop();
 
@@ -107,10 +107,11 @@ class MessageTest {
         HiberniaPlayer hp = mock(HiberniaPlayer.class);
         UUID uuid = UUID.randomUUID();
 
-        when(hp.getCurrentName()).thenReturn("Alex");
+        // HiberniaPlayer routing must use the stable UUID, not the (possibly
+        // stale) current name.
+        when(hp.getUniqueId()).thenReturn(uuid);
 
         try (MockedStatic<Bukkit> bukkit = org.mockito.Mockito.mockStatic(Bukkit.class)) {
-            bukkit.when(() -> Bukkit.getPlayer("Alex")).thenReturn(player);
             bukkit.when(() -> Bukkit.getPlayer(uuid)).thenReturn(player);
 
             message.send(hp, "chat", "name", "Sam");
@@ -118,6 +119,64 @@ class MessageTest {
 
             verify(player, org.mockito.Mockito.times(2)).sendMessage(any(Component.class));
         }
+    }
+
+    @Test
+    void format_escapesMiniMessageTagsInUserValues() throws Exception {
+        writeMessages("chat=Hello {name}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Component out = message.component("chat", "name", "<red>Hacker</red>");
+
+        // The tags must render literally, not as markup.
+        String plain = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out);
+        assertEquals("Hello <red>Hacker</red>", plain);
+    }
+
+    @Test
+    void format_userValuesCannotExpandPlaceholders() throws Exception {
+        writeMessages("""
+                placeholder.prefix=[SECRET]
+                chat=Hello {name}
+                """);
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        String out = message.format("chat", Map.of("name", "{prefix}"));
+
+        // A player-controlled value containing {prefix} must stay literal.
+        assertEquals("Hello {prefix}", out);
+    }
+
+    @Test
+    void format_richValuesPassMarkupThrough() throws Exception {
+        writeMessages("chat=Hello {name}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Component out = message.component("chat", Map.of("name", Message.rich("<red>Trusted</red>")));
+
+        String plain = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out);
+        // Markup parsed: tags do not appear in the plain text.
+        assertEquals("Hello Trusted", plain);
+    }
+
+    @Test
+    void componentOr_usesKeyWhenPresentAndFallbackOtherwise() throws Exception {
+        writeMessages("hibernia.error.not-found=<red>Missing: {message}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        var serializer = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText();
+
+        Component fromKey = message.componentOr("hibernia.error.not-found", "<red>{message}</red>", "message", "thing");
+        assertEquals("Missing: thing", serializer.serialize(fromKey));
+
+        Component fromFallback = message.componentOr("hibernia.error.conflict", "<red>{message}</red>", "message", "clash");
+        assertEquals("clash", serializer.serialize(fromFallback));
     }
 
     @Test

@@ -10,7 +10,14 @@ import java.lang.reflect.Constructor;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Level;
 
+/**
+ * Discovers {@code @ConfigurationComponent} classes on the classpath,
+ * instantiates them and injects their {@code @ConfigurationValue} fields from
+ * the plugin's {@code config.yml}. Instances are singletons, intended to be
+ * bound into Guice (which {@code HiberniaModule} does automatically).
+ */
 @Singleton
 public class ConfigurationLoader {
 
@@ -46,20 +53,41 @@ public class ConfigurationLoader {
                 // Store component
                 components.put(componentClass, instance);
             } catch (Exception e) {
-                plugin.getLogger().severe("Failed to instantiate component: " + componentClass.getName());
+                plugin.getLogger().log(Level.SEVERE,
+                        "Failed to instantiate component: " + componentClass.getName(), e);
             }
         }
     }
 
     /**
-     * Get a component by class
+     * Get a component by class.
+     *
+     * @throws IllegalStateException when no component of that class was loaded —
+     *         either {@code scanPackage(...)} never covered its package, or the
+     *         component failed to load (see the startup log)
      */
-    @SuppressWarnings("unchecked")
     public <T> T getComponent(Class<T> componentClass) {
-        return (T) components.get(componentClass);
+        Object component = components.get(componentClass);
+        if (component == null) {
+            throw new IllegalStateException("No @ConfigurationComponent loaded for "
+                    + componentClass.getName() + " — check that scanPackage(...) covers its package"
+                    + " and that it instantiated without errors (see startup log).");
+        }
+        return componentClass.cast(component);
     }
 
     public Map<Class<?>, Object> getComponents() {
         return components;
+    }
+
+    /**
+     * Re-read {@code config.yml} from disk and re-inject every loaded component
+     * in place. Component instances keep their identity (so existing Guice
+     * bindings and injected references stay valid); only their field values
+     * change.
+     */
+    public void reload() {
+        plugin.reloadConfig();
+        components.values().forEach(processor::process);
     }
 }

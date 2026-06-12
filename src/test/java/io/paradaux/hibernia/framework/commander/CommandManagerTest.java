@@ -3,6 +3,7 @@ package io.paradaux.hibernia.framework.commander;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.suggestion.Suggestions;
@@ -20,33 +21,42 @@ import io.paradaux.hibernia.framework.commander.annotations.Route;
 import io.paradaux.hibernia.framework.commander.annotations.Sender;
 import io.paradaux.hibernia.framework.commander.spi.CommandHandler;
 import io.paradaux.hibernia.framework.commander.spi.ParameterResolver;
+import io.paradaux.hibernia.framework.exceptions.NotFoundException;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.math.BigDecimal;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -113,6 +123,11 @@ class CommandManagerTest {
             throw new RuntimeException("kaboom");
         }
 
+        @Route("missing")
+        public void missing() {
+            throw new NotFoundException("widget missing");
+        }
+
         @Route("custom <target>")
         public void custom(@Arg("target") DummyType target) {
             this.lastMessage = target.value;
@@ -147,16 +162,6 @@ class CommandManagerTest {
         public void deep(@Arg("first") String first, @Arg("second") String second) {
             this.lastMessage = first + second;
         }
-
-        @Route("<first>")
-        public void argFirst(@Arg("first") int first) {
-            this.lastNumber = first;
-        }
-
-        @Route("<sender>")
-        public void senderAsArg(@Sender CommandSender sender) {
-            // no-op
-        }
     }
 
     static class BadGreedyHandler {
@@ -173,6 +178,7 @@ class CommandManagerTest {
         }
     }
 
+    @Command("base")
     static class DefaultRouteHandler implements CommandHandler {
         boolean called;
 
@@ -186,6 +192,72 @@ class CommandManagerTest {
         @Route("raw <provided>")
         public void mismatch(@Arg("different") String value) {
             // no-op
+        }
+    }
+
+    static class SenderPlaceholderHandler {
+        @Route("<sender>")
+        public void senderAsArg(@Sender CommandSender sender) {
+            // no-op
+        }
+    }
+
+    static class PrimitiveOptionalHandler {
+        @Route("page [page]")
+        public void page(@OptionalArg("page") int page) {
+            // no-op
+        }
+    }
+
+    static class LiteralAfterOptionalHandler {
+        @Route("x [a] y")
+        public void invalid(@OptionalArg("a") String a) {
+            // no-op
+        }
+    }
+
+    static class SenderDefaultHandler {
+        CommandSender got;
+
+        @Route("whoami [target]")
+        public void whoami(@OptionalArg(value = "target", defaultValue = OptionalArg.SENDER) CommandSender target) {
+            this.got = target;
+        }
+    }
+
+    @Command("opt")
+    static class OptionalTailHandler implements CommandHandler {
+        @Route("top [page]")
+        public void top(@OptionalArg(value = "page", defaultValue = "1") Integer page) {
+            // no-op
+        }
+    }
+
+    @Command("test")
+    static class DupAHandler implements CommandHandler {
+        @Route("dup")
+        public void a() {
+        }
+    }
+
+    @Command("test")
+    static class DupBHandler implements CommandHandler {
+        @Route("dup")
+        public void b() {
+        }
+    }
+
+    @Command("test")
+    static class IntSetHandler implements CommandHandler {
+        @Route("set <value>")
+        public void set(@Arg("value") int value) {
+        }
+    }
+
+    @Command("test")
+    static class StringSetHandler implements CommandHandler {
+        @Route("set <value> confirm")
+        public void set(@Arg("value") String value) {
         }
     }
 
@@ -248,6 +320,43 @@ class CommandManagerTest {
     }
 
     @Test
+    void extractArguments_senderDefault_injectsCommandSender() throws Exception {
+        SenderDefaultHandler h = new SenderDefaultHandler();
+        Method method = SenderDefaultHandler.class.getDeclaredMethod("whoami", CommandSender.class);
+        Object binding = invokeBindRoute(h, method, "whoami [target]", null);
+
+        CommandSender sender = mock(CommandSender.class);
+        CommandContext<CommandSourceStack> context = mockCommandContext(sender);
+        when(context.getArgument("target", Object.class)).thenThrow(new IllegalArgumentException("missing"));
+
+        Object[] args = invokeExtractArguments(context, binding, sender);
+
+        assertEquals(1, args.length);
+        assertSame(sender, args[0]);
+    }
+
+    @Test
+    void extractArguments_emptyDefault_yieldsNullForReferenceType() throws Exception {
+        // Non-String reference-typed optional with an empty default resolves to
+        // null (Strings keep the legacy ""-default behavior).
+        Object binding = invokeBindRoute(new TestHelperHolder(),
+                TestHelperHolder.class.getDeclaredMethod("nullable", DummyType.class), "maybe [target]", null);
+
+        CommandContext<CommandSourceStack> context = mockCommandContext(mock(CommandSender.class));
+        when(context.getArgument("target", Object.class)).thenThrow(new IllegalArgumentException("missing"));
+
+        Object[] args = invokeExtractArguments(context, binding, mock(CommandSender.class));
+
+        assertEquals(1, args.length);
+        assertNull(args[0]);
+    }
+
+    static class TestHelperHolder {
+        public void nullable(@OptionalArg("target") DummyType target) {
+        }
+    }
+
+    @Test
     void createArgumentSuggestionProvider_usesPlaceholderFallbackWhenNoResolverSuggestions() throws Exception {
         Method method = TestHandler.class.getDeclaredMethod("say", CommandSender.class, String.class);
         Object binding = invokeBindRoute(handler, method, "say <message>", null);
@@ -307,11 +416,11 @@ class CommandManagerTest {
         );
 
         assertEquals(0, result);
-        verify(sender).sendMessage(anyString());
+        verify(sender).sendMessage(any(Component.class));
     }
 
     @Test
-    void executeBinding_logsAndMessagesOnInvocationTargetException() throws Exception {
+    void executeBinding_unknownExceptionSendsInternalErrorAndLogsStackTrace() throws Exception {
         Method method = TestHandler.class.getDeclaredMethod("boom");
         Object binding = invokeBindRoute(handler, method, "boom", null);
 
@@ -327,8 +436,36 @@ class CommandManagerTest {
         );
 
         assertEquals(1, result);
-        verify(sender).sendMessage(anyString());
-        verify(logger).warning(anyString());
+        ArgumentCaptor<Component> captor = ArgumentCaptor.forClass(Component.class);
+        verify(sender).sendMessage(captor.capture());
+        String plain = PlainTextComponentSerializer.plainText().serialize(captor.getValue());
+        // The raw exception message must NOT leak to the sender for unknown exceptions.
+        assertFalse(plain.contains("kaboom"));
+        verify(logger).log(eq(Level.SEVERE), anyString(), any(Throwable.class));
+    }
+
+    @Test
+    void executeBinding_notFoundExceptionRendersItsMessageToSender() throws Exception {
+        Method method = TestHandler.class.getDeclaredMethod("missing");
+        Object binding = invokeBindRoute(handler, method, "missing", null);
+
+        CommandSender sender = mock(CommandSender.class);
+        CommandContext<CommandSourceStack> context = mockCommandContext(sender);
+
+        int result = (int) invokePrivate(
+                "executeBinding",
+                new Class[]{CommandContext.class, binding.getClass()},
+                context,
+                binding
+        );
+
+        assertEquals(1, result);
+        ArgumentCaptor<Component> captor = ArgumentCaptor.forClass(Component.class);
+        verify(sender).sendMessage(captor.capture());
+        String plain = PlainTextComponentSerializer.plainText().serialize(captor.getValue());
+        assertTrue(plain.contains("widget missing"));
+        // Semantic exceptions are expected control flow — no severe logging.
+        verify(logger, never()).log(eq(Level.SEVERE), anyString(), any(Throwable.class));
     }
 
     @Test
@@ -459,10 +596,23 @@ class CommandManagerTest {
         }).when(scheduler).runTask(any(JavaPlugin.class), any(Runnable.class));
 
         CommandSender sender = mock(CommandSender.class);
-        invokePrivate("safeMsg", new Class[]{CommandSender.class, String.class}, sender, "hello");
+        Component msg = Component.text("hello");
+        invokePrivate("safeMsg", new Class[]{CommandSender.class, Component.class}, sender, msg);
 
         assertTrue(ran.get());
-        verify(sender).sendMessage("hello");
+        verify(sender).sendMessage(msg);
+    }
+
+    @Test
+    void safeMsg_sendsDirectlyOnPrimaryThread() throws Exception {
+        when(server.isPrimaryThread()).thenReturn(true);
+        CommandSender sender = mock(CommandSender.class);
+
+        Component msg = Component.text("direct");
+        invokePrivate("safeMsg", new Class[]{CommandSender.class, Component.class}, sender, msg);
+
+        verify(sender).sendMessage(msg);
+        verify(scheduler, never()).runTask(any(JavaPlugin.class), any(Runnable.class));
     }
 
     @Test
@@ -476,59 +626,6 @@ class CommandManagerTest {
     }
 
     @Test
-    void addRoute_andBuildCommandTree_createExpectedNodes() throws Exception {
-        Method sayMethod = TestHandler.class.getDeclaredMethod("say", CommandSender.class, String.class);
-        Method customMethod = TestHandler.class.getDeclaredMethod("custom", DummyType.class);
-
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("root");
-        invokePrivate("buildCommandTree",
-                new Class[]{LiteralArgumentBuilder.class, CommandHandler.class, List.class, String.class},
-                root,
-                handler,
-                List.of(sayMethod, customMethod),
-                null);
-
-        var node = root.build();
-        assertNotNull(node.getChild("say"));
-        assertNotNull(node.getChild("custom"));
-    }
-
-    @Test
-    void addRouteToArgument_handlesLiteralAndArgumentSegments() throws Exception {
-        Method method = TestHandler.class.getDeclaredMethod("num", int.class);
-        Object binding = invokeBindRoute(handler, method, "num <n>", null);
-
-        RequiredArgumentBuilder<CommandSourceStack, String> parent =
-                Commands.argument("base", StringArgumentType.word());
-
-        invokePrivate("addRouteToArgument",
-                new Class[]{RequiredArgumentBuilder.class, binding.getClass(), int.class},
-                parent,
-                binding,
-                0);
-
-        var node = parent.build();
-        assertNotNull(node.getChild("num"));
-    }
-
-    @Test
-    void buildCommandTree_withDefaultRoute_setsRootCommand() throws Exception {
-        DefaultRouteHandler defaultHandler = new DefaultRouteHandler();
-        Method rootMethod = DefaultRouteHandler.class.getDeclaredMethod("root");
-
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("base");
-        invokePrivate("buildCommandTree",
-                new Class[]{LiteralArgumentBuilder.class, CommandHandler.class, List.class, String.class},
-                root,
-                defaultHandler,
-                List.of(rootMethod),
-                null);
-
-        var node = root.build();
-        assertNotNull(node.getCommand());
-    }
-
-    @Test
     void bindRoute_throwsWhenParameterHasNoArgumentAnnotation() throws Exception {
         MissingAnnotationHandler bad = new MissingAnnotationHandler();
         Method method = MissingAnnotationHandler.class.getDeclaredMethod("invalid", String.class);
@@ -536,6 +633,55 @@ class CommandManagerTest {
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> invokeBindRoute(bad, method, "oops <value>", null));
         assertTrue(ex.getMessage().contains("Parameter missing"));
+    }
+
+    @Test
+    void bindRoute_throwsWhenRoutePlaceholderHasNoMatchingParam() throws Exception {
+        MismatchArgHandler mismatch = new MismatchArgHandler();
+        Method method = MismatchArgHandler.class.getDeclaredMethod("mismatch", String.class);
+
+        // This used to silently drop the route from the command tree.
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> invokeBindRoute(mismatch, method, "raw <provided>", null));
+        assertTrue(ex.getMessage().contains("no @Arg"));
+    }
+
+    @Test
+    void bindRoute_throwsWhenPlaceholderTargetsSenderOnlyMethod() throws Exception {
+        SenderPlaceholderHandler bad = new SenderPlaceholderHandler();
+        Method method = SenderPlaceholderHandler.class.getDeclaredMethod("senderAsArg", CommandSender.class);
+
+        assertThrows(IllegalStateException.class,
+                () -> invokeBindRoute(bad, method, "<sender>", null));
+    }
+
+    @Test
+    void bindRoute_throwsWhenRequiredArgMissingFromRoute() throws Exception {
+        Method method = TestHandler.class.getDeclaredMethod("num", int.class);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> invokeBindRoute(handler, method, "", null));
+        assertTrue(ex.getMessage().contains("does not appear in route"));
+    }
+
+    @Test
+    void bindRoute_throwsWhenPrimitiveOptionalHasNoDefault() throws Exception {
+        PrimitiveOptionalHandler bad = new PrimitiveOptionalHandler();
+        Method method = PrimitiveOptionalHandler.class.getDeclaredMethod("page", int.class);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> invokeBindRoute(bad, method, "page [page]", null));
+        assertTrue(ex.getMessage().contains("primitive"));
+    }
+
+    @Test
+    void bindRoute_throwsWhenLiteralFollowsOptionalSegment() throws Exception {
+        LiteralAfterOptionalHandler bad = new LiteralAfterOptionalHandler();
+        Method method = LiteralAfterOptionalHandler.class.getDeclaredMethod("invalid", String.class);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> invokeBindRoute(bad, method, "x [a] y", null));
+        assertTrue(ex.getMessage().contains("cannot follow an optional"));
     }
 
     @Test
@@ -553,15 +699,112 @@ class CommandManagerTest {
     }
 
     @Test
-    void extractArguments_throwsWhenRequiredArgumentMissingFromRoute() throws Exception {
+    void registerHandler_buildsExpectedNodes() throws Exception {
+        Map<String, Object> roots = new LinkedHashMap<>();
+        List<Object> index = new ArrayList<>();
+
+        invokeRegisterHandler(roots, index, handler);
+
+        var node = rootBuilder(roots, "test").build();
+        assertNotNull(node.getChild("say"));
+        assertNotNull(node.getChild("custom"));
+        assertNotNull(node.getChild("alpha"));
+        // default route registered at the root
+        assertNotNull(node.getCommand());
+        assertFalse(index.isEmpty());
+    }
+
+    @Test
+    void registerHandler_optionalTail_isExecutableWithAndWithoutTheArg() throws Exception {
+        Map<String, Object> roots = new LinkedHashMap<>();
+        List<Object> index = new ArrayList<>();
+
+        invokeRegisterHandler(roots, index, new OptionalTailHandler());
+
+        var node = rootBuilder(roots, "opt").build();
+        var top = node.getChild("top");
+        assertNotNull(top);
+        // /opt top          → executable (defaults apply)
+        assertNotNull(top.getCommand());
+        // /opt top <page>   → executable
+        assertNotNull(top.getChild("page"));
+        assertNotNull(top.getChild("page").getCommand());
+    }
+
+    @Test
+    void registerHandler_defaultRoute_setsRootCommand() throws Exception {
+        Map<String, Object> roots = new LinkedHashMap<>();
+        List<Object> index = new ArrayList<>();
+
+        invokeRegisterHandler(roots, index, new DefaultRouteHandler());
+
+        var node = rootBuilder(roots, "base").build();
+        assertNotNull(node.getCommand());
+    }
+
+    @Test
+    void registerHandler_detectsDuplicateRoutesAcrossHandlers() throws Exception {
+        Map<String, Object> roots = new LinkedHashMap<>();
+        List<Object> index = new ArrayList<>();
+
+        invokeRegisterHandler(roots, index, new DupAHandler());
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> invokeRegisterHandler(roots, index, new DupBHandler()));
+        assertTrue(ex.getMessage().contains("Route conflict"));
+    }
+
+    @Test
+    void registerHandler_detectsArgumentTypeConflictAcrossHandlers() throws Exception {
+        Map<String, Object> roots = new LinkedHashMap<>();
+        List<Object> index = new ArrayList<>();
+
+        invokeRegisterHandler(roots, index, new IntSetHandler());
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> invokeRegisterHandler(roots, index, new StringSetHandler()));
+        assertTrue(ex.getMessage().contains("Argument type conflict"));
+    }
+
+    @Test
+    void addSegments_handlesLiteralAndArgumentChains() throws Exception {
+        Method method = TestHandler.class.getDeclaredMethod("deep", String.class, String.class);
+        Object binding = invokeBindRoute(handler, method, "alpha <first> beta <second>", null);
+
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("root");
+        invokePrivate("addSegments",
+                new Class[]{ArgumentBuilder.class, binding.getClass(), int.class, String.class},
+                root,
+                binding,
+                0,
+                null);
+
+        var node = root.build();
+        assertNotNull(node.getChild("alpha"));
+        assertNotNull(node.getChild("alpha").getChild("first"));
+        assertNotNull(node.getChild("alpha").getChild("first").getChild("beta"));
+        assertNotNull(node.getChild("alpha").getChild("first").getChild("beta").getChild("second"));
+        assertNotNull(node.getChild("alpha").getChild("first").getChild("beta").getChild("second").getCommand());
+    }
+
+    @Test
+    void addSegments_underArgumentParent_buildsNestedNodes() throws Exception {
         Method method = TestHandler.class.getDeclaredMethod("num", int.class);
-        Object binding = invokeBindRoute(handler, method, "", null);
+        Object binding = invokeBindRoute(handler, method, "num <n>", null);
 
-        CommandContext<CommandSourceStack> context = mockCommandContext(mock(CommandSender.class));
+        RequiredArgumentBuilder<CommandSourceStack, String> parent =
+                Commands.argument("base", StringArgumentType.word());
 
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> invokeExtractArguments(context, binding, mock(CommandSender.class)));
-        assertTrue(ex.getMessage().contains("Missing required argument"));
+        invokePrivate("addSegments",
+                new Class[]{ArgumentBuilder.class, binding.getClass(), int.class, String.class},
+                parent,
+                binding,
+                0,
+                null);
+
+        var node = parent.build();
+        assertNotNull(node.getChild("num"));
+        assertNotNull(node.getChild("num").getChild("n"));
     }
 
     @Test
@@ -574,36 +817,6 @@ class CommandManagerTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> invokeExtractArguments(context, binding, mock(CommandSender.class)));
         assertTrue(ex.getMessage().contains("blank value"));
-    }
-
-    @Test
-    void safeMsg_sendsDirectlyOnPrimaryThread() throws Exception {
-        when(server.isPrimaryThread()).thenReturn(true);
-        CommandSender sender = mock(CommandSender.class);
-
-        invokePrivate("safeMsg", new Class[]{CommandSender.class, String.class}, sender, "direct");
-
-        verify(sender).sendMessage("direct");
-        verify(scheduler, never()).runTask(any(JavaPlugin.class), any(Runnable.class));
-    }
-
-    @Test
-    void addRoute_returnsWithoutAddingNodeWhenParamMissing() throws Exception {
-        MismatchArgHandler mismatch = new MismatchArgHandler();
-        Method method = MismatchArgHandler.class.getDeclaredMethod("mismatch", String.class);
-        Object binding = invokeBindRoute(mismatch, method, "raw <provided>", null);
-
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("root");
-        invokePrivate("addRoute",
-                new Class[]{LiteralArgumentBuilder.class, binding.getClass(), int.class, String.class},
-                root,
-                binding,
-                0,
-                null);
-
-        var node = root.build();
-        assertNotNull(node.getChild("raw"));
-        assertNull(node.getChild("raw").getChild("provided"));
     }
 
     @Test
@@ -638,7 +851,10 @@ class CommandManagerTest {
         );
 
         assertEquals(1, result);
-        verify(sender).sendMessage(anyString());
+        ArgumentCaptor<Component> captor = ArgumentCaptor.forClass(Component.class);
+        verify(sender).sendMessage(captor.capture());
+        // Argument feedback keeps the explanatory message.
+        assertTrue(PlainTextComponentSerializer.plainText().serialize(captor.getValue()).contains("bad number"));
     }
 
     @Test
@@ -658,131 +874,36 @@ class CommandManagerTest {
         );
 
         assertEquals(1, result);
-        verify(sender).sendMessage(anyString());
-        verify(logger).warning(anyString());
-    }
-
-    @Test
-    void addRoute_literalWithClassPermission_addsLiteralNode() throws Exception {
-        Object binding = invokeBindRoute(handler,
-                TestHandler.class.getDeclaredMethod("num", int.class),
-                "num <n>", null);
-
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("root");
-        invokePrivate("addRoute",
-                new Class[]{LiteralArgumentBuilder.class, binding.getClass(), int.class, String.class},
-                root,
-                binding,
-                0,
-                "perm.root");
-
-        var node = root.build();
-        assertNotNull(node.getChild("num"));
-    }
-
-    @Test
-    void addRouteToArgument_depthAtEnd_setsCommand() throws Exception {
-        Object binding = invokeBindRoute(handler,
-                TestHandler.class.getDeclaredMethod("num", int.class),
-                "num <n>", null);
-
-        Field pathField = binding.getClass().getDeclaredField("path");
-        pathField.setAccessible(true);
-        List<?> path = (List<?>) pathField.get(binding);
-
-        RequiredArgumentBuilder<CommandSourceStack, String> parent =
-                Commands.argument("base", StringArgumentType.word());
-
-        invokePrivate("addRouteToArgument",
-                new Class[]{RequiredArgumentBuilder.class, binding.getClass(), int.class},
-                parent,
-                binding,
-                path.size());
-
-        assertNotNull(parent.build().getCommand());
-    }
-
-    @Test
-    void addRouteToArgument_recursiveLiteralAndArgPath_buildsNestedNodes() throws Exception {
-    Object binding = invokeBindRoute(handler,
-        TestHandler.class.getDeclaredMethod("deep", String.class, String.class),
-        "alpha <first> beta <second>", null);
-
-    RequiredArgumentBuilder<CommandSourceStack, String> parent =
-        Commands.argument("start", StringArgumentType.word());
-
-    invokePrivate("addRouteToArgument",
-        new Class[]{RequiredArgumentBuilder.class, binding.getClass(), int.class},
-        parent,
-        binding,
-        1);
-
-    var node = parent.build();
-    assertNotNull(node.getChild("first"));
-    assertNotNull(node.getChild("first").getChild("beta"));
-    assertNotNull(node.getChild("first").getChild("beta").getChild("second"));
-    }
-
-    @Test
-    void addRoute_argFirstWithClassPermission_addsArgumentNode() throws Exception {
-    Object binding = invokeBindRoute(handler,
-        TestHandler.class.getDeclaredMethod("argFirst", int.class),
-        "<first>", null);
-
-    LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("root");
-    invokePrivate("addRoute",
-        new Class[]{LiteralArgumentBuilder.class, binding.getClass(), int.class, String.class},
-        root,
-        binding,
-        0,
-        "perm.arg");
-
-    assertNotNull(root.build().getChild("first"));
-    }
-
-    @Test
-    void addRoute_argWithSenderParam_returnsWithoutAddingNode() throws Exception {
-    Object binding = invokeBindRoute(handler,
-        TestHandler.class.getDeclaredMethod("senderAsArg", CommandSender.class),
-        "<sender>", null);
-
-    LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("root");
-    invokePrivate("addRoute",
-        new Class[]{LiteralArgumentBuilder.class, binding.getClass(), int.class, String.class},
-        root,
-        binding,
-        0,
-        null);
-
-    assertNull(root.build().getChild("sender"));
+        verify(sender).sendMessage(any(Component.class));
+        verify(logger).log(eq(Level.SEVERE), anyString(), any(Throwable.class));
     }
 
     @Test
     void extractArguments_optionalWithoutRoutePlaceholder_usesDefaultValue() throws Exception {
-    Object binding = invokeBindRoute(handler,
-        TestHandler.class.getDeclaredMethod("optionalAtRoot", int.class),
-        "", null);
+        Object binding = invokeBindRoute(handler,
+                TestHandler.class.getDeclaredMethod("optionalAtRoot", int.class),
+                "", null);
 
-    CommandContext<CommandSourceStack> context = mockCommandContext(mock(CommandSender.class));
-    Object[] args = invokeExtractArguments(context, binding, mock(CommandSender.class));
+        CommandContext<CommandSourceStack> context = mockCommandContext(mock(CommandSender.class));
+        Object[] args = invokeExtractArguments(context, binding, mock(CommandSender.class));
 
-    assertEquals(1, args.length);
-    // Default resolved to the declared int type, not the raw annotation String.
-    assertEquals(5, args[0]);
+        assertEquals(1, args.length);
+        // Default resolved to the declared int type, not the raw annotation String.
+        assertEquals(5, args[0]);
     }
 
     @Test
     void extractArguments_resolverEmpty_triggersInvalidArgumentSupplier() throws Exception {
-    Object binding = invokeBindRoute(handler,
-        TestHandler.class.getDeclaredMethod("sanitized", String.class),
-        "san <text>", null);
+        Object binding = invokeBindRoute(handler,
+                TestHandler.class.getDeclaredMethod("sanitized", String.class),
+                "san <text>", null);
 
-    CommandContext<CommandSourceStack> context = mockCommandContext(mock(CommandSender.class));
-    when(context.getArgument("text", Object.class)).thenReturn("!@#$");
+        CommandContext<CommandSourceStack> context = mockCommandContext(mock(CommandSender.class));
+        when(context.getArgument("text", Object.class)).thenReturn("!@#$");
 
-    IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-        () -> invokeExtractArguments(context, binding, mock(CommandSender.class)));
-    assertTrue(ex.getMessage().contains("Invalid text"));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> invokeExtractArguments(context, binding, mock(CommandSender.class)));
+        assertTrue(ex.getMessage().contains("Invalid text"));
     }
 
     private Object readField(Object instance, String field) throws Exception {
@@ -820,6 +941,19 @@ class CommandManagerTest {
                 routeAnnotation,
                 classPerm
         );
+    }
+
+    private void invokeRegisterHandler(Map<String, Object> roots, List<Object> index, CommandHandler h) throws Exception {
+        invokePrivate("registerHandler", new Class[]{Map.class, List.class, CommandHandler.class}, roots, index, h);
+    }
+
+    @SuppressWarnings("unchecked")
+    private LiteralArgumentBuilder<CommandSourceStack> rootBuilder(Map<String, Object> roots, String label) throws Exception {
+        Object spec = roots.get(label);
+        assertNotNull(spec, "no RootSpec registered for /" + label);
+        Field builderField = spec.getClass().getDeclaredField("builder");
+        builderField.setAccessible(true);
+        return (LiteralArgumentBuilder<CommandSourceStack>) builderField.get(spec);
     }
 
     private Object[] invokeExtractArguments(CommandContext<CommandSourceStack> context, Object binding, CommandSender sender) throws Exception {

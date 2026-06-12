@@ -24,4 +24,13 @@ import java.lang.annotation.Target;
 public @interface Command {
     /** Root labels e.g. {"eco","economy"} */
     String[] value();
+
+    /**
+     * Human-readable description of the command, passed to Paper's command
+     * registrar (shown in {@code /help} output). When several handler classes
+     * share a root label, the first non-empty description wins.
+     *
+     * @return the command description, or an empty string for none
+     */
+    String description() default "";
 }
