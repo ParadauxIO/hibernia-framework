@@ -7,6 +7,11 @@ import io.paradaux.hibernia.framework.commander.spi.CommandHandler;
 import io.paradaux.hibernia.framework.commander.spi.ParameterResolver;
 import io.paradaux.hibernia.framework.configurator.ConfigurationLoader;
 import io.paradaux.hibernia.framework.i18n.Message;
+import io.paradaux.hibernia.framework.usher.render.DialogRenderer;
+import io.paradaux.hibernia.framework.usher.render.PaperDialogRenderer;
+import io.paradaux.hibernia.framework.usher.spi.BedrockSupport;
+import io.paradaux.hibernia.framework.usher.spi.DialogHandler;
+import io.paradaux.hibernia.framework.usher.spi.InputBinder;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -29,8 +34,11 @@ import java.util.Objects;
  *   <li>{@link Message} as an eager singleton (disable with
  *       {@link Builder#withoutMessages()} if the plugin bundles no
  *       {@code messages.properties})</li>
- *   <li>Multibinder sets for {@link CommandHandler}, {@link ParameterResolver}
- *       and Bukkit {@link Listener} implementations</li>
+ *   <li>Multibinder sets for {@link CommandHandler}, {@link ParameterResolver},
+ *       Bukkit {@link Listener}, {@link DialogHandler} and {@link InputBinder}
+ *       implementations</li>
+ *   <li>{@link DialogRenderer} to the Paper-backed renderer, plus an optional
+ *       {@link BedrockSupport} when {@link Builder#bedrockSupport(Class)} is set</li>
  * </ul>
  *
  * <p>Typical bootstrap:</p>
@@ -61,6 +69,9 @@ public final class HiberniaModule extends AbstractModule {
     private final List<Class<? extends CommandHandler>> handlers;
     private final List<Class<? extends ParameterResolver<?>>> resolvers;
     private final List<Class<? extends Listener>> listeners;
+    private final List<Class<? extends DialogHandler>> dialogs;
+    private final List<Class<? extends InputBinder<?>>> inputBinders;
+    private final Class<? extends BedrockSupport> bedrockSupport;
     private final boolean bindMessage;
 
     private HiberniaModule(Builder builder) {
@@ -68,6 +79,9 @@ public final class HiberniaModule extends AbstractModule {
         this.handlers = List.copyOf(builder.handlers);
         this.resolvers = List.copyOf(builder.resolvers);
         this.listeners = List.copyOf(builder.listeners);
+        this.dialogs = List.copyOf(builder.dialogs);
+        this.inputBinders = List.copyOf(builder.inputBinders);
+        this.bedrockSupport = builder.bedrockSupport;
         this.bindMessage = builder.bindMessage;
         this.configurationLoader = new ConfigurationLoader(plugin);
         builder.configurationPackages.forEach(configurationLoader::scanPackage);
@@ -110,6 +124,20 @@ public final class HiberniaModule extends AbstractModule {
 
         Multibinder<Listener> listenerBinder = Multibinder.newSetBinder(binder(), Listener.class);
         listeners.forEach(l -> listenerBinder.addBinding().to(l));
+
+        // Dialog tier. The set binders are created unconditionally so DialogManager
+        // is always injectable (with empty sets when the plugin uses no dialogs).
+        Multibinder<DialogHandler> dialogBinder = Multibinder.newSetBinder(binder(), DialogHandler.class);
+        dialogs.forEach(d -> dialogBinder.addBinding().to(d));
+
+        Multibinder<InputBinder<?>> inputBinderBinder =
+                Multibinder.newSetBinder(binder(), new TypeLiteral<InputBinder<?>>() {});
+        inputBinders.forEach(b -> inputBinderBinder.addBinding().to(b));
+
+        bind(DialogRenderer.class).to(PaperDialogRenderer.class);
+        if (bedrockSupport != null) {
+            bind(BedrockSupport.class).to(bedrockSupport);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -124,6 +152,9 @@ public final class HiberniaModule extends AbstractModule {
         private final List<Class<? extends CommandHandler>> handlers = new ArrayList<>();
         private final List<Class<? extends ParameterResolver<?>>> resolvers = new ArrayList<>();
         private final List<Class<? extends Listener>> listeners = new ArrayList<>();
+        private final List<Class<? extends DialogHandler>> dialogs = new ArrayList<>();
+        private final List<Class<? extends InputBinder<?>>> inputBinders = new ArrayList<>();
+        private Class<? extends BedrockSupport> bedrockSupport;
         private boolean bindMessage = true;
 
         private Builder(JavaPlugin plugin) {
@@ -154,6 +185,29 @@ public final class HiberniaModule extends AbstractModule {
         @SafeVarargs
         public final Builder listeners(Class<? extends Listener>... classes) {
             listeners.addAll(List.of(classes));
+            return this;
+        }
+
+        /** Dialog handler classes to bind into the {@code Set<DialogHandler>} multibinder. */
+        @SafeVarargs
+        public final Builder dialogs(Class<? extends DialogHandler>... classes) {
+            dialogs.addAll(List.of(classes));
+            return this;
+        }
+
+        /** Custom {@link InputBinder} classes to bind into the {@code Set<InputBinder<?>>} multibinder. */
+        @SafeVarargs
+        public final Builder inputBinders(Class<? extends InputBinder<?>>... classes) {
+            inputBinders.addAll(List.of(classes));
+            return this;
+        }
+
+        /**
+         * Bind a {@link BedrockSupport} implementation (e.g. Floodgate-backed) used by the dialog tier to
+         * detect Bedrock viewers. When unset, everyone is treated as a Java player.
+         */
+        public Builder bedrockSupport(Class<? extends BedrockSupport> impl) {
+            this.bedrockSupport = Objects.requireNonNull(impl, "impl");
             return this;
         }
 

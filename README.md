@@ -317,6 +317,75 @@ This is done in the above example to fill in the firm name in this business/comp
 
 **Placeholder values are inert by default**: MiniMessage tags inside a supplied value are escaped (shown literally) and braces in a value never trigger further placeholder expansion, so player-controlled strings can't inject markup or clickable components into your messages. When you deliberately want markup in a value — say a pre-coloured amount — wrap it: `message.send(sender, "key", "amount", Message.rich("<green>$1,000</green>"))`. Only do that for values the operator (not the player) controls.
 
+### 4. Dialogs (Usher)
+
+`usher` is to Paper's [Dialog API](https://docs.papermc.io/paper/dev/dialogs/) what `commander` is to Brigadier: a declarative, DI-wired, annotation-driven layer that removes the boilerplate of building dialogs and reading their inputs back by hand.
+
+A `@Dialog` handler declares `@Screen` methods (each returns a `DialogView`) and `@Action` methods (run when a button is clicked). All the screens of one handler form a single navigable flow sharing a `@Model` object:
+
+```java
+@Dialog("find")
+public final class FindDialog implements DialogHandler {
+
+    @Inject FindTaskFactory tasks;   // constructor/field injection like any handler
+
+    @Screen   // the default "main" screen
+    public DialogView main(@Model FindState state, DialogFlow flow) {
+        return DialogView.multiAction("find.title")
+                .toggle("fuzzy", "find.fuzzy", "opt.on", "opt.off", state.fuzzy())
+                .button("find.search", "submit")     // → @Action("submit")
+                .open("find.filters", "filters")      // → opens the "filters" screen
+                .exit("button.close")
+                .build();
+    }
+
+    @Screen("filters")
+    public DialogView filters(@Model FindState state) {
+        return DialogView.confirmation("find.filters.title")
+                .confirm("button.save", "applyFilters")
+                .deny("button.back")                  // closes (or use a @Action that calls flow.back())
+                .build();
+    }
+
+    @Action("submit")
+    public void submit(@Sender Player player, @Input("fuzzy") boolean fuzzy,
+                       @Model FindState state, DialogFlow flow) {
+        state.setFuzzy(fuzzy);                        // typed — no view.getText(...).equals("enabled")
+        flow.await(tasks.find(state), Text.key("find.querying"), (results, f) -> {
+            f.close();
+            // … show results
+        });
+    }
+}
+```
+
+Open a flow from a command (or anywhere) with the injected `DialogManager`:
+
+```java
+dialogManager.open(player, FindDialog.class, new FindState(item));
+```
+
+Key pieces, each the dialog-tier cousin of something `commander` already has:
+
+- **Typed input readback** — `@Input("key") T` resolves through an `InputBinder<T>` (the analogue of `ParameterResolver`). Built-ins cover `String`, `boolean`, `int`, `long`, `float`, `double`; register custom binders (e.g. for a domain enum) via `HiberniaModule.inputBinders(...)`. An on/off `.toggle(...)` reads back as a plain `boolean`.
+- **`DialogFlow`** owns navigation — `flow.open("filters")`, `flow.back()`, `flow.refresh()`, `flow.close()` — so screens stop threading `Supplier<Dialog> previous` by hand. `flow.await(future, waitText, onDone)` shows a wait-screen, runs the future off the main thread, and hands you the result back on the main thread.
+- **`DialogView`** is a renderer-agnostic spec; all text is a `Message` key (or `Text.of(component)`), so dialog labels are translatable like everything else. The only class touching Paper's dialog runtime is `PaperDialogRenderer`.
+- **Errors** thrown from an `@Action` (including the framework's `NotFoundException`/`ConflictException`/… propagated from your services) render to the viewer through the same `hibernia.error.*` keys as command feedback.
+- **Bedrock** — bind a Floodgate-backed `BedrockSupport` via `HiberniaModule.bedrockSupport(...)`; handlers branch on `flow.isBedrockViewer()`.
+
+Wire it up in the bootstrap module:
+
+```java
+HiberniaModule.forPlugin(this)
+        .dialogs(FindDialog.class)
+        .inputBinders(ShopTypeBinder.class)   // optional custom binders
+        // .bedrockSupport(FloodgateBedrockSupport.class)
+        .build();
+// …then, after creating the injector, dialogs are shown on demand via DialogManager.open(...).
+```
+
+> Registry-backed dialog types (`dialogList`, `serverLinks`) are not yet wrapped — `usher` currently covers the dynamic `notice`/`confirmation`/`multiAction` dialogs, which is what gameplay commands use.
+
 ## Guice Glue
 
 It's expected to use this framework in conjunction with Guice; if you are not familiar with Guice use other resources at first to get yourself acquainted with the library or the general principles of dependency injection.

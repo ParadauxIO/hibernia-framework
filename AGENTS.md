@@ -87,6 +87,16 @@ src/main/java/io/paradaux/hibernia/framework/
 ├── guice/                     # HiberniaModule — framework-owned Guice bootstrap module
 ├── i18n/                      # Message.java — templated messaging with MiniMessage (values escaped by default)
 ├── models/                    # HiberniaPlayer interface
+├── usher/                     # Dialog framework over Paper's Dialog API (commander-style)
+│   ├── DialogManager.java     # orchestrator: index handlers, open flows, route clicks, error mapping
+│   ├── DialogView.java        # renderer-agnostic screen spec (fluent builder, fully unit-tested)
+│   ├── DialogFlow.java        # per-viewer navigation back-stack + async await()
+│   ├── DialogContext.java / Text.java / ButtonSpec.java
+│   ├── annotations/           # @Dialog, @Screen, @Action, @Input, @Model
+│   ├── input/                 # DialogInputSpec (text/bool/toggle/option/number)
+│   ├── binders/               # BuiltinInputBinders (String/Boolean/Integer/Long/Float/Double)
+│   ├── render/                # DialogRenderer iface + PaperDialogRenderer (the only Paper-coupled class)
+│   └── spi/                   # DialogHandler, InputBinder<T>, BedrockSupport
 └── utils/                     # StringUtils
 ```
 
