@@ -8,6 +8,7 @@ import io.paradaux.hibernia.framework.usher.annotations.Dialog;
 import io.paradaux.hibernia.framework.usher.annotations.Input;
 import io.paradaux.hibernia.framework.usher.annotations.Model;
 import io.paradaux.hibernia.framework.usher.annotations.Screen;
+import io.paradaux.hibernia.framework.usher.input.DialogInputSpec;
 import io.paradaux.hibernia.framework.usher.render.DialogRenderer;
 import io.paradaux.hibernia.framework.usher.spi.DialogHandler;
 import io.paradaux.hibernia.framework.usher.spi.InputBinder;
@@ -48,12 +49,15 @@ class DialogManagerTest {
         boolean fuzzyApplied;
     }
 
+    enum Choice { BUY, SELL }
+
     @Dialog("test")
     static class TestDialog implements DialogHandler {
         String lastAction;
         boolean lastFuzzy;
         int lastPage;
         Object lastModel;
+        Choice lastChoice;
         String awaited;
 
         @Screen
@@ -61,12 +65,21 @@ class DialogManagerTest {
             return DialogView.multiAction("main.title")
                     .toggle("fuzzy", "l", "on", "off", false)
                     .number("page", Text.key("l"), 1, 10, 1f, 1f)
+                    .option("type", Text.key("l"), List.of(
+                            new DialogInputSpec.OptionSpec("BUY", Text.key("b"), true),
+                            new DialogInputSpec.OptionSpec("SELL", Text.key("s"), false)))
                     .button("search", "submit")
                     .button("query", "query")
                     .button("boom", "boom")
+                    .button("pick", "pick")
                     .open("filters-btn", "filters")
                     .exit("close")
                     .build();
+        }
+
+        @Action("pick")
+        public void pick(@Input("type") Choice type) {
+            this.lastChoice = type;
         }
 
         @Screen("filters")
@@ -201,6 +214,17 @@ class DialogManagerTest {
         assertTrue(handler.lastFuzzy);
         assertEquals(5, handler.lastPage);
         assertSame(model, handler.lastModel);
+    }
+
+    @Test
+    void action_bindsEnumInputByConstantName_caseInsensitive() {
+        manager.open(player, TestDialog.class, model);
+
+        DialogResponseView view = mock(DialogResponseView.class);
+        when(view.getText("type")).thenReturn("sell");   // lower-case id from the client
+        clickAction("pick", view);
+
+        assertEquals(Choice.SELL, handler.lastChoice);
     }
 
     @Test

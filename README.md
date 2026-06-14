@@ -6,8 +6,24 @@ The framework deliberately covers the **entrypoint tier** (commands, event liste
 
 Check out the AI-Generated documentation which is more-or-less accurate at http://deepwiki.com/paradauxio/hibernia-framework
 
+## Documentation
+
+Full usage guides live in [`docs/`](docs/README.md):
+
+- [Getting started](docs/getting-started.md) — install, the `onEnable` bootstrap, project layout & layering
+- [Dependency injection](docs/dependency-injection.md) — `HiberniaModule`, what it binds, manual wiring
+- [Commands](docs/commands.md) — `@Command`/`@Route`, arguments, resolvers, permissions, async, help
+- [Configuration](docs/configuration.md) — `@ConfigurationComponent` POJOs, supported types, reload
+- [Messages & i18n](docs/messages.md) — `messages.properties`, placeholders, MiniMessage, escaping
+- [Exceptions](docs/exceptions.md) — the HTTP-semantic exceptions and how they render
+- [Events](docs/events.md) — DI-managed Bukkit listeners
+- [Dialogs (Usher)](docs/dialogs.md) — `@Dialog`/`@Screen`/`@Action`, typed inputs, navigation, async
+
+The rest of this README is a tour; the guides above are the reference.
+
 ## Feature List
 - Command registration, handling and routing with Paper and Brigadier support, validated at registration time (a typo'd route fails loudly at startup, never silently at runtime).
+- Dialog support over the Paper Dialog API (`usher`): declarative `@Dialog` screens with typed input read-back and managed navigation.
 - Event listener registration through DI (`ListenerManager`).
 - Semantic exceptions (`NotFoundException`, `ConflictException`, …) thrown from your service layer and rendered to the player automatically, with operator-overridable `hibernia.error.*` message keys.
 - Localisation via a templated `properties` file. This uses MiniMessage/Adventure for formatting. Player-controlled placeholder values are escaped by default.
@@ -348,7 +364,7 @@ public final class FindDialog implements DialogHandler {
     }
 
     @Action("submit")
-    public void submit(@Sender Player player, @Input("fuzzy") boolean fuzzy,
+    public void submit(Player viewer, @Input("fuzzy") boolean fuzzy,
                        @Model FindState state, DialogFlow flow) {
         state.setFuzzy(fuzzy);                        // typed — no view.getText(...).equals("enabled")
         flow.await(tasks.find(state), Text.key("find.querying"), (results, f) -> {
@@ -359,6 +375,9 @@ public final class FindDialog implements DialogHandler {
 }
 ```
 
+> The viewer is injected by type (`Player`/`Audience`/`CommandSender`) — dialogs have no positional
+> arguments, so there's no `@Sender`.
+
 Open a flow from a command (or anywhere) with the injected `DialogManager`:
 
 ```java
@@ -367,7 +386,7 @@ dialogManager.open(player, FindDialog.class, new FindState(item));
 
 Key pieces, each the dialog-tier cousin of something `commander` already has:
 
-- **Typed input readback** — `@Input("key") T` resolves through an `InputBinder<T>` (the analogue of `ParameterResolver`). Built-ins cover `String`, `boolean`, `int`, `long`, `float`, `double`; register custom binders (e.g. for a domain enum) via `HiberniaModule.inputBinders(...)`. An on/off `.toggle(...)` reads back as a plain `boolean`.
+- **Typed input readback** — `@Input("key") T` resolves through an `InputBinder<T>` (the analogue of `ParameterResolver`). Built-ins cover `String`, `boolean`, `int`, `long`, `float`, `double`, and **any enum** (an option input whose ids are the enum constant names); register custom binders via `HiberniaModule.inputBinders(...)`. An on/off `.toggle(...)` reads back as a plain `boolean`.
 - **`DialogFlow`** owns navigation — `flow.open("filters")`, `flow.back()`, `flow.refresh()`, `flow.close()` — so screens stop threading `Supplier<Dialog> previous` by hand. `flow.await(future, waitText, onDone)` shows a wait-screen, runs the future off the main thread, and hands you the result back on the main thread.
 - **`DialogView`** is a renderer-agnostic spec; all text is a `Message` key (or `Text.of(component)`), so dialog labels are translatable like everything else. The only class touching Paper's dialog runtime is `PaperDialogRenderer`.
 - **Errors** thrown from an `@Action` (including the framework's `NotFoundException`/`ConflictException`/… propagated from your services) render to the viewer through the same `hibernia.error.*` keys as command feedback.
@@ -385,6 +404,8 @@ HiberniaModule.forPlugin(this)
 ```
 
 > Registry-backed dialog types (`dialogList`, `serverLinks`) are not yet wrapped — `usher` currently covers the dynamic `notice`/`confirmation`/`multiAction` dialogs, which is what gameplay commands use.
+
+**→ Full guide: [docs/dialogs.md](docs/dialogs.md).** Commands: [docs/commands.md](docs/commands.md) · Configuration: [docs/configuration.md](docs/configuration.md) · Messages: [docs/messages.md](docs/messages.md) · Exceptions: [docs/exceptions.md](docs/exceptions.md) · Events: [docs/events.md](docs/events.md).
 
 ## Guice Glue
 

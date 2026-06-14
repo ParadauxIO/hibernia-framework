@@ -265,15 +265,30 @@ public class DialogManager {
         Class<?> boxed = box(type);
         @SuppressWarnings("unchecked")
         InputBinder<Object> binder = (InputBinder<Object>) binders.get(boxed);
-        if (binder == null) {
+        Object value;
+        if (binder != null) {
+            value = binder.read(view, key);
+        } else if (type.isEnum()) {
+            // Built-in: an option input whose ids are the enum constant names binds straight to the enum.
+            value = readEnum(type, view.getText(key));
+        } else {
             throw new IllegalStateException("No InputBinder registered for @Input type " + type.getSimpleName());
         }
-        Object value = binder.read(view, key);
         if (value == null && type.isPrimitive()) {
             throw new IllegalArgumentException("Input '" + key + "' was absent but parameter is primitive "
                     + type.getSimpleName());
         }
         return value;
+    }
+
+    private static Object readEnum(Class<?> type, String raw) {
+        if (raw == null) return null;
+        for (Object constant : type.getEnumConstants()) {
+            if (((Enum<?>) constant).name().equalsIgnoreCase(raw)) {
+                return constant;
+            }
+        }
+        return null;   // unknown id (e.g. a malformed client response) → null, not an exception
     }
 
     // ── indexing & validation ─────────────────────────────────────────────────────
@@ -324,9 +339,12 @@ public class DialogManager {
     private void validateActionInputs(Method method) {
         for (Parameter param : method.getParameters()) {
             Input input = param.getAnnotation(Input.class);
-            if (input != null && !binders.containsKey(box(param.getType()))) {
+            if (input == null) continue;
+            Class<?> type = param.getType();
+            // Enums are bound generically (constant-name match); everything else needs a binder.
+            if (!type.isEnum() && !binders.containsKey(box(type))) {
                 throw new IllegalStateException("@Input(\"" + input.value() + "\") on " + method
-                        + " has no registered InputBinder for type " + param.getType().getSimpleName());
+                        + " has no registered InputBinder for type " + type.getSimpleName());
             }
         }
     }
