@@ -165,6 +165,57 @@ class MessageTest {
     }
 
     @Test
+    void component_rendersComponentValuedPlaceholder_preservingFormatting() throws Exception {
+        writeMessages("bought=<gray>You bought {item}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Component item = Component.text("Diamond Sword")
+                .color(net.kyori.adventure.text.format.NamedTextColor.RED);
+
+        Component out = message.component("bought", "item", item);
+
+        // The Component was inserted (not toString()'d): its text and colour survive.
+        assertEquals("You bought Diamond Sword", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out));
+        String mmOut = net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(out);
+        assertTrue(mmOut.contains("Diamond Sword"));
+        assertTrue(mmOut.contains("red"));   // the placeholder's own colour, not toString garbage
+    }
+
+    @Test
+    void component_nestedPalettePlaceholdersResolveRecursively() throws Exception {
+        writeMessages("""
+                placeholder.brand=<bold>{label}</bold>
+                placeholder.label=ACME
+                line={brand} Store
+                """);
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Component out = message.component("line");
+
+        assertEquals("ACME Store", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out));
+    }
+
+    @Test
+    void component_callerValueOverridesPalettePlaceholder() throws Exception {
+        writeMessages("""
+                placeholder.name=DefaultName
+                greet=Hi {name}
+                """);
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+
+        assertEquals("Hi DefaultName", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(message.component("greet")));
+        assertEquals("Hi Alex", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(message.component("greet", "name", "Alex")));
+    }
+
+    @Test
     void componentOr_usesKeyWhenPresentAndFallbackOtherwise() throws Exception {
         writeMessages("hibernia.error.not-found=<red>Missing: {message}");
         stubSaveResourceNoop();

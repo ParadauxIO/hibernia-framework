@@ -26,7 +26,7 @@ The rest of this README is a tour; the guides above are the reference.
 - Dialog support over the Paper Dialog API (`usher`): declarative `@Dialog` screens with typed input read-back and managed navigation.
 - Event listener registration through DI (`ListenerManager`).
 - Semantic exceptions (`NotFoundException`, `ConflictException`, …) thrown from your service layer and rendered to the player automatically, with operator-overridable `hibernia.error.*` message keys.
-- Localisation via templated `properties` files with **per-player locale selection** (ResourceBundle-style `messages_<lang>.properties`, per-key fallback to the base file). MiniMessage/Adventure formatting; player-controlled placeholder values are escaped by default.
+- Localisation via templated `properties` files with **per-player locale selection** (ResourceBundle-style `messages_<lang>.properties`, per-key fallback to the base file). MiniMessage/Adventure formatting via tag resolvers: plain placeholder values are escaped (safe for player input), `Component` values (formatted item/player names) render with styling intact, and `Message.rich(...)` passes trusted markup.
 - Configuration deserialisation and mapping, including in-place `reload()`.
 - A framework-owned Guice module (`HiberniaModule`) so a plugin's bootstrap is a few lines.
 
@@ -330,7 +330,7 @@ business.firm.disband.broadcast={prefix} {secbegin}{firm}{secend} has been disba
 A sender has to be either a CommandSender (e.g., Player), a UUID, or a custom class which implements the `HiberniaPlayer` interface (resolved by UUID). This is then followed by the key-value pairs as varargs, where the first value is the placeholder you wish to replace, and the second is the value to put to that placeholder. 
 This is done in the above example to fill in the firm name in this business/company plugin.
 
-**Placeholder values are inert by default**: MiniMessage tags inside a supplied value are escaped (shown literally) and braces in a value never trigger further placeholder expansion, so player-controlled strings can't inject markup or clickable components into your messages. When you deliberately want markup in a value — say a pre-coloured amount — wrap it: `message.send(sender, "key", "amount", Message.rich("<green>$1,000</green>"))`. Only do that for values the operator (not the player) controls.
+**Placeholder values are inert by default**: a plain value is inserted as literal text (its MiniMessage tags and braces never expand), so player-controlled strings can't inject markup or clickable components. Pass a **`Component`** value (e.g. `itemStack.displayName()`) and it renders with its styling intact; wrap a string in **`Message.rich("<green>$1,000</green>")`** to pass trusted operator markup. See **[docs/messages.md](docs/messages.md#placeholder-value-types)**.
 
 ### 4. Dialogs (Usher)
 

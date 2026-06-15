@@ -5,7 +5,10 @@ import com.google.inject.Singleton;
 import io.paradaux.hibernia.framework.models.HiberniaPlayer;
 import lombok.extern.slf4j.Slf4j;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.ComponentLike;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -40,13 +43,19 @@ import java.util.regex.Pattern;
  * <h2>Placeholders</h2>
  * <p>{@code {name}} placeholders resolve in order: caller-supplied values, then
  * {@code <namespace>.placeholder.*} keys, then global {@code placeholder.*} keys, walking the locale
- * fallback chain (most specific first); expansion is recursive (bounded) so placeholders can reference
- * each other.</p>
+ * fallback chain (most specific first); palette entries are expanded recursively so placeholders can
+ * reference each other. {@link #component}/{@link #componentOr}/{@link #send} build the message with
+ * MiniMessage tag resolvers; {@link #format} is a string utility on the same key/placeholder pipeline.</p>
  *
- * <p><strong>Caller-supplied values are inert by default:</strong> MiniMessage tags in a value are
- * escaped (rendered literally) and braces in a value are never re-expanded, so player-controlled strings
- * cannot inject markup or recurse into other placeholders. To deliberately pass markup through a value —
- * e.g. a pre-formatted amount — wrap it with {@link #rich(String)}.</p>
+ * <p>A placeholder value's type decides how it renders (in the {@link #component} path):</p>
+ * <ul>
+ *   <li>a {@link net.kyori.adventure.text.ComponentLike} — e.g. a formatted item or player name — renders
+ *       as that component, with its styling intact;</li>
+ *   <li>a {@link Rich} value is parsed as trusted MiniMessage markup;</li>
+ *   <li>any other value is <strong>inert</strong>: inserted as literal text, so MiniMessage tags and braces
+ *       in player-controlled strings cannot inject markup. (In the string-only {@link #format} path a
+ *       {@code ComponentLike} is rendered via {@code toString()} — use {@link #component} for those.)</li>
+ * </ul>
  */
 @Slf4j
 @Singleton
@@ -126,19 +135,26 @@ public final class Message {
     }
 
     public Component component(String key, Object... kvPairs) {
-        return mm.deserialize(format(defaultLocale, key, kvPairs));
+        return component(defaultLocale, key, kvToMap(kvPairs));
     }
 
     public Component component(String key, Map<String, ?> values) {
-        return mm.deserialize(format(defaultLocale, key, values));
+        return component(defaultLocale, key, values);
     }
 
     public Component component(Locale locale, String key, Object... kvPairs) {
-        return mm.deserialize(format(locale, key, kvPairs));
+        return component(locale, key, kvToMap(kvPairs));
     }
 
+    /**
+     * Build a {@link Component} for {@code key} in {@code locale}. Placeholder values are bound as
+     * MiniMessage tag resolvers, so a value may be a {@link ComponentLike} (a formatted item or player
+     * name) and render properly — unlike {@link #format(Locale, String, Map)}, which is a string utility
+     * and would render such a value via {@code toString()}.
+     */
     public Component component(Locale locale, String key, Map<String, ?> values) {
-        return mm.deserialize(format(locale, key, values));
+        String pattern = findRaw(locale, key);
+        return new ResolverRender(locale, namespaceOf(key), values).render(pattern != null ? pattern : key);
     }
 
     /**
@@ -162,8 +178,8 @@ public final class Message {
 
     public Component componentOr(Locale locale, String key, String fallbackPattern, Map<String, ?> values) {
         String pattern = findRaw(locale, key);
-        return mm.deserialize(formatPattern(locale, pattern != null ? pattern : fallbackPattern,
-                namespaceOf(key), values));
+        return new ResolverRender(locale, namespaceOf(key), values)
+                .render(pattern != null ? pattern : fallbackPattern);
     }
 
     // ── sending ───────────────────────────────────────────────────────────────────
@@ -393,6 +409,112 @@ public final class Message {
             map.put((String) k, kvPairs[i + 1]);
         }
         return map;
+    }
+
+    /**
+     * Builds a {@link Component} from a pattern using MiniMessage tag resolvers (the path behind
+     * {@link #component}/{@link #componentOr}/{@link #send}, as opposed to the string-only
+     * {@link #format}).
+     *
+     * <p>Each {@code {name}} placeholder becomes a generated MiniMessage tag bound to a resolver:</p>
+     * <ul>
+     *   <li>caller {@link ComponentLike} value → {@code Placeholder.component} (a formatted item/player
+     *       name renders properly, instead of being {@code toString()}'d)</li>
+     *   <li>caller {@link Rich} value → {@code Placeholder.parsed} (trusted markup)</li>
+     *   <li>any other caller value → {@code Placeholder.unparsed} (safe literal text — no escaping hacks)</li>
+     *   <li>{@code placeholder.*} palette entry → {@code Placeholder.parsed} (may carry markup and
+     *       reference other placeholders, which MiniMessage resolves recursively)</li>
+     * </ul>
+     *
+     * <p>The admin-facing {@code {a.b}}/camelCase placeholder names are preserved; the actual MiniMessage
+     * tags are generated ({@code ph0}, {@code ph1}, …) so any name is a valid tag regardless of
+     * MiniMessage's stricter tag-name rules. An unknown {@code {name}} is left literal. Caller values take
+     * precedence over palette entries of the same name.</p>
+     */
+    private final class ResolverRender {
+        private final List<Bundle> chain;
+        private final String ns;
+        private final Map<String, ?> values;
+        private final Map<String, String> nameToTag = new HashMap<>();
+        private final List<TagResolver> resolvers = new ArrayList<>();
+
+        ResolverRender(Locale locale, String ns, Map<String, ?> values) {
+            this.chain = chainFor(locale);
+            this.ns = ns;
+            this.values = values == null ? Map.of() : values;
+        }
+
+        Component render(String pattern) {
+            String converted = convert(pattern);
+            try {
+                return mm.deserialize(converted, TagResolver.resolver(resolvers));
+            } catch (RuntimeException e) {
+                // A malformed pattern or a cyclic placeholder shouldn't take down the caller.
+                log.warn("Failed to render message: {}", e.getMessage());
+                return Component.text(pattern);
+            }
+        }
+
+        /** Replace each known {@code {name}} with its generated {@code <tag>}; leave unknowns literal. */
+        private String convert(String text) {
+            text = text.replace("{{", LBR).replace("}}", RBR);
+            Matcher m = PLACEHOLDER.matcher(text);
+            StringBuilder sb = new StringBuilder(text.length() + 16);
+            while (m.find()) {
+                String name = m.group(1);
+                String tag = tagFor(name);
+                m.appendReplacement(sb,
+                        Matcher.quoteReplacement(tag != null ? "<" + tag + ">" : "{" + name + "}"));
+            }
+            m.appendTail(sb);
+            return sb.toString().replace(LBR, "{").replace(RBR, "}");
+        }
+
+        /** The generated tag for a known placeholder (registering its resolver), or {@code null}. */
+        private String tagFor(String name) {
+            String existing = nameToTag.get(name);
+            if (existing != null) return existing;
+
+            Object value = values.get(name);
+            if (value != null) {
+                String tag = newTag(name);
+                if (value instanceof Rich rich) {
+                    resolvers.add(Placeholder.parsed(tag, convert(rich.value())));
+                } else if (value instanceof ComponentLike componentLike) {
+                    resolvers.add(Placeholder.component(tag, componentLike));
+                } else {
+                    resolvers.add(Placeholder.unparsed(tag, Objects.toString(value)));
+                }
+                return tag;
+            }
+
+            String palette = paletteValue(name);
+            if (palette != null) {
+                String tag = newTag(name);
+                resolvers.add(Placeholder.parsed(tag, convert(palette)));
+                return tag;
+            }
+            return null;
+        }
+
+        private String newTag(String name) {
+            String tag = "ph" + nameToTag.size();
+            nameToTag.put(name, tag);   // register before any recursive convert() to break cycles
+            return tag;
+        }
+
+        private String paletteValue(String name) {
+            for (Bundle bundle : chain) {
+                Map<String, String> nsMap = bundle.nsPh.get(ns);
+                if (nsMap != null) {
+                    String v = nsMap.get(name);
+                    if (v != null) return v;
+                }
+                String global = bundle.globalPh.get(name);
+                if (global != null) return global;
+            }
+            return null;
+        }
     }
 
     /**

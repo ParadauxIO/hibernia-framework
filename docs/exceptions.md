@@ -61,7 +61,7 @@ hibernia.error.not-found={prefix} <red>{message}</red>
 hibernia.error.internal={prefix} <red>Something went wrong — an admin has been notified.</red>
 ```
 
-Because exception messages flow through the [escaping rules](messages.md#placeholder-values-are-inert-by-default),
+Because exception messages flow through the [escaping rules](messages.md#placeholder-value-types),
 they're safe to surface even when they incorporate user-derived text.
 
 ---

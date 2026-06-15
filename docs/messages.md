@@ -67,20 +67,33 @@ Placeholder values are passed as alternating `key, value` varargs.
 | `componentOr(String key, String fallbackPattern, …)` | render the key, or a fallback MiniMessage pattern if the key is absent |
 | `reload()` | re-read `messages.properties` from disk |
 
-## Placeholder values are inert by default
+## Placeholder value types
 
-A caller-supplied value is **escaped**: MiniMessage tags in it render literally, and braces in it never
-trigger further placeholder expansion. So a player-controlled string (a chat message, a name) cannot
-inject markup or clickable `run_command` components into your messages.
+`component(...)`, `componentOr(...)` and `send(...)` bind each placeholder value as a MiniMessage tag
+resolver, so the **type** of the value you pass decides how it renders:
 
-When you deliberately want a value to carry markup — say a pre-coloured amount the *operator* controls —
-wrap it in `Message.rich(...)`:
+| Value type | Renders as | Use for |
+|------------|-----------|---------|
+| any plain value (`String`, number, …) | **inert literal text** (tags escaped, braces not expanded) | the default — safe for player-controlled input |
+| a `Component` / `ComponentLike` | that component, **styling intact** | a formatted item name, a coloured player name, a clickable element |
+| `Message.rich(String)` | **trusted MiniMessage markup** | operator-controlled markup (e.g. a pre-coloured amount) |
+
+So a player-controlled string (a chat message, a name) can never inject markup or a clickable
+`run_command` into your messages, while a `Component` you build yourself renders properly:
 
 ```java
+// inert: any tags in the player's name render literally
+message.send(sender, "chat", "name", player.getName());
+
+// component: the item's formatted display name keeps its colour/style
+message.send(sender, "shop.bought", "item", itemStack.displayName());
+
+// trusted markup (operator value only — never wrap raw player input)
 message.send(sender, "shop.sold", "amount", Message.rich("<green>$1,000</green>"));
 ```
 
-Only use `rich(...)` for values you trust. Never wrap raw player input.
+> `format(...)` returns a `String` and is the exception: it can't hold a component, so a `ComponentLike`
+> value is rendered via `toString()` there. Use `component(...)`/`send(...)` whenever a value is a component.
 
 ## Locales
 

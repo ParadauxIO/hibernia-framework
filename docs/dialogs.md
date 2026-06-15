@@ -261,8 +261,10 @@ bean, with the same escaping rules) or `Text.of(component)` for a pre-built `Com
 take a `String` treat it as a message key. With no `Message` bean bound, a key is rendered as raw
 MiniMessage so prototyping still works.
 
-> Tip: for a title/body that needs a component placeholder (e.g. an item name), pre-build it with
-> `Text.of(...)` rather than passing a `Component` as a `Text.key` placeholder value.
+> Tip: a `Text.key(...)` placeholder value may itself be a `Component` — e.g.
+> `Text.key("find.title", "item", itemStack.displayName())` renders the item's formatted name inline
+> (see [Messages → placeholder value types](messages.md#placeholder-value-types)). Use `Text.of(component)`
+> when the whole piece of text is a pre-built component.
 
 ## Errors
 
