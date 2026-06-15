@@ -162,7 +162,46 @@ This works automatically when PlaceholderAPI is installed (and is a no-op when i
 `messages.properties` with `%tokens%` just renders them literally). No extra wiring: `HiberniaModule`
 binds a reflective bridge by default, so the framework takes **no hard dependency** on PlaceholderAPI.
 
-Important details:
+### Getting it working in your plugin
+
+**There is nothing to add in your code** — `HiberniaModule` already binds the bridge, and `Message`
+picks it up. The setup is entirely server/manifest side:
+
+1. **Install PlaceholderAPI on the server** (`plugins/PlaceholderAPI.jar`) and download the expansions
+   your placeholders need, e.g. for `%vault_*%`:
+   ```
+   /papi ecloud download Vault
+   /papi reload
+   ```
+   This is operator action — the framework doesn't bundle PlaceholderAPI or its expansions.
+
+2. **Declare PlaceholderAPI as a soft dependency** in your plugin manifest so it loads first. It's
+   *soft* (not required) — your plugin still loads, and messages still render, if PlaceholderAPI is
+   absent.
+
+   Paper (`paper-plugin.yml`):
+   ```yaml
+   dependencies:
+     server:
+       PlaceholderAPI:
+         load: BEFORE
+         required: false
+   ```
+   Legacy (`plugin.yml`):
+   ```yaml
+   softdepend: [PlaceholderAPI]
+   ```
+
+3. **Write `%token%` placeholders** in `messages.properties` and send to a player. Done — the bridge
+   resolves them against the recipient (`send(player, …)`).
+
+You only need to touch Gradle if your plugin wants to **register its own** placeholders (expose a
+`%myplugin_*%` expansion). That's a separate concern from consuming placeholders in messages and uses
+PlaceholderAPI's own API — add `compileOnly("me.clip:placeholderapi:<version>")` (repo
+`https://repo.extendedclip.com/releases/`) and extend `PlaceholderExpansion`. Consuming `%token%` in
+messages (this page) needs none of that.
+
+### Important details
 
 - `%token%` resolution is applied only to **operator-authored** text — the message pattern and
   `placeholder.*` palette entries — and only on paths that have a player: `send(...)`, and the
