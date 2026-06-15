@@ -2,11 +2,12 @@
 
 [← Docs index](README.md)
 
-The `i18n` module is a templated, MiniMessage-formatted messaging system over a `messages.properties`
-file, with a `Message` bean of helper methods for sending keyed messages with placeholder substitution.
+The `i18n` module is a templated, MiniMessage-formatted, **locale-aware** messaging system over
+`messages.properties` files, with a `Message` bean of helper methods for sending keyed messages with
+placeholder substitution. Each message is rendered in the recipient's own locale; a plugin that ships
+only one file behaves exactly as a single-locale plugin.
 
-> This is a single-file template system, not full per-player internationalisation: there is one
-> `messages.properties` per plugin and no per-locale selection (yet).
+See [Locales](#locales) for translations. The rest of this section uses the base file.
 
 ## `messages.properties`
 
@@ -80,6 +81,56 @@ message.send(sender, "shop.sold", "amount", Message.rich("<green>$1,000</green>"
 ```
 
 Only use `rich(...)` for values you trust. Never wrap raw player input.
+
+## Locales
+
+`messages.properties` is the **base bundle**. Translations are sibling files named with a locale suffix
+(the [`ResourceBundle`](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/ResourceBundle.html)
+convention):
+
+```
+plugins/MyPlugin/
+├── messages.properties        # base / default
+├── messages_ga.properties     # Irish
+├── messages_fr.properties     # French
+└── messages_pt_BR.properties  # Brazilian Portuguese
+```
+
+A message is rendered in the **recipient's client locale** (`Player.locale()`). Console and other
+non-player senders use the configured **default locale** (`Locale.ROOT` — the base file — unless you set
+one):
+
+```java
+message.defaultLocale(Locale.of("ga"));   // optional; e.g. read from config
+```
+
+**Fallback is per key.** Lookup walks `lang_COUNTRY → lang → default-locale → base` and uses the first
+bundle that defines the key (or placeholder). So a translator only overrides the keys they've actually
+translated — everything else falls through to the base text. A plugin shipping only
+`messages.properties` resolves every locale to that file.
+
+```properties
+# messages.properties
+greeting=Hello, {name}!
+only.english=This line isn't translated anywhere.
+```
+```properties
+# messages_ga.properties  (only translates what it needs)
+greeting=Dia duit, {name}!
+```
+
+```java
+message.send(player, "greeting", "name", player.getName());
+// Irish client → "Dia duit, Alex!"   English/other client → "Hello, Alex!"
+// `only.english` resolves to the base text for every locale.
+```
+
+`broadcast(...)` and `send(Collection, …)` render **per recipient**, so a single broadcast reaches each
+player in their own language. `Message.availableLocales()` returns the locales a bundle file was found
+for. Command and dialog error messages (`hibernia.error.*`) are localized to the sender too.
+
+> The framework selects the locale; **you** supply the translated files. This module still uses
+> `.properties` (not YAML) and the `{name}` placeholder syntax.
 
 ## `HiberniaPlayer`
 

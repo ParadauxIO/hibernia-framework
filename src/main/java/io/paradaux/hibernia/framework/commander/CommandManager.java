@@ -521,7 +521,7 @@ public class CommandManager {
         Message msg = resolveMessage();
         Component component;
         if (msg != null) {
-            component = msg.componentOr(key, fallbackPattern, values);
+            component = msg.componentOr(sender, key, fallbackPattern, values);   // sender's locale
         } else {
             String pattern = fallbackPattern;
             for (Map.Entry<String, ?> e : values.entrySet()) {

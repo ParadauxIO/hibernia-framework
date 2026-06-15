@@ -26,7 +26,7 @@ The rest of this README is a tour; the guides above are the reference.
 - Dialog support over the Paper Dialog API (`usher`): declarative `@Dialog` screens with typed input read-back and managed navigation.
 - Event listener registration through DI (`ListenerManager`).
 - Semantic exceptions (`NotFoundException`, `ConflictException`, …) thrown from your service layer and rendered to the player automatically, with operator-overridable `hibernia.error.*` message keys.
-- Localisation via a templated `properties` file. This uses MiniMessage/Adventure for formatting. Player-controlled placeholder values are escaped by default.
+- Localisation via templated `properties` files with **per-player locale selection** (ResourceBundle-style `messages_<lang>.properties`, per-key fallback to the base file). MiniMessage/Adventure formatting; player-controlled placeholder values are escaped by default.
 - Configuration deserialisation and mapping, including in-place `reload()`.
 - A framework-owned Guice module (`HiberniaModule`) so a plugin's bootstrap is a few lines.
 
@@ -34,7 +34,6 @@ Coming soon:
 - Bi-directional configuration, have set values be reflected in the configuration file.
 - Regularly scheduled task creation (Akin to @Scheduled in Spring)
 - PlaceholderAPI support within the localisation module.
-- Per-player locale support in the localisation module (it is currently a single-file template system, not full i18n).
 
 ## Using the framework 
 
@@ -289,7 +288,7 @@ The framework contains the logic to scan a package for ConfigurationComponent-an
 
 ### Localisation
 
-The framework includes a simple templated message system, which allows for the use of a `messages.properties` and a `Message` class which has helper methods for sending messages using keys from this file, along with key-value placeholders and their replacements. (Note: this is one file per plugin — per-player locale selection is on the roadmap.)
+The framework includes a templated message system, which allows for the use of a `messages.properties` and a `Message` class which has helper methods for sending messages using keys from this file, along with key-value placeholders and their replacements. It is **locale-aware**: drop sibling `messages_<lang>.properties` files (e.g. `messages_ga.properties`) and each player is messaged in their own client locale, with per-key fallback to the base file. See **[docs/messages.md](docs/messages.md#locales)** for the full guide.
 
 Example:
 ```properties

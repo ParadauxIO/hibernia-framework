@@ -230,11 +230,95 @@ class MessageTest {
         assertEquals("After", message.format("chat"));
     }
 
+    // ── per-locale bundles ───────────────────────────────────────────────────
+
+    @Test
+    void format_selectsLocaleBundle_andFallsBackPerKey() throws Exception {
+        writeMessages("""
+                greeting=Hello {name}
+                only.base=Base only
+                """);
+        writeBundle("ga", """
+                greeting=Dia duit {name}
+                """);   // note: 'only.base' is NOT translated
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+
+        // locale-specific key
+        assertEquals("Dia duit Alex", message.format(java.util.Locale.of("ga"), "greeting", "name", "Alex"));
+        // base key
+        assertEquals("Hello Alex", message.format(java.util.Locale.ENGLISH, "greeting", "name", "Alex"));
+        // per-key fallback: missing in ga → base text
+        assertEquals("Base only", message.format(java.util.Locale.of("ga"), "only.base"));
+    }
+
+    @Test
+    void format_countryFallsBackToLanguageThenBase() throws Exception {
+        writeMessages("k=base");
+        writeBundle("pt", "k=portugues");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+
+        // pt_BR has no bundle → falls back to pt
+        assertEquals("portugues", message.format(java.util.Locale.of("pt", "BR"), "k"));
+        // fr has no bundle → base
+        assertEquals("base", message.format(java.util.Locale.of("fr"), "k"));
+    }
+
+    @Test
+    void send_rendersInPlayerLocale() throws Exception {
+        writeMessages("greeting=Hello");
+        writeBundle("ga", "greeting=Dia duit");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Player player = mock(Player.class);
+        when(player.locale()).thenReturn(java.util.Locale.of("ga"));
+
+        message.send(player, "greeting");
+
+        org.mockito.ArgumentCaptor<Component> captor = org.mockito.ArgumentCaptor.forClass(Component.class);
+        verify(player).sendMessage(captor.capture());
+        assertEquals("Dia duit", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(captor.getValue()));
+    }
+
+    @Test
+    void availableLocales_includesBaseAndTranslations() throws Exception {
+        writeMessages("k=v");
+        writeBundle("ga", "k=v");
+        writeBundle("pt_BR", "k=v");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+
+        assertTrue(message.availableLocales().contains(java.util.Locale.ROOT));
+        assertTrue(message.availableLocales().contains(java.util.Locale.of("ga")));
+        assertTrue(message.availableLocales().contains(java.util.Locale.of("pt", "BR")));
+    }
+
+    @Test
+    void defaultLocale_appliesToNonPlayerSenders() throws Exception {
+        writeMessages("k=base");
+        writeBundle("ga", "k=as Gaeilge");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin).defaultLocale(java.util.Locale.of("ga"));
+
+        assertEquals("as Gaeilge", message.format("k"));   // no-locale overload uses the default
+    }
+
     private void stubSaveResourceNoop() {
         doAnswer(invocation -> null).when(plugin).saveResource(anyString(), anyBoolean());
     }
 
     private void writeMessages(String content) throws IOException {
         Files.writeString(tempDir.resolve("messages.properties"), content, StandardCharsets.UTF_8);
+    }
+
+    private void writeBundle(String localeSuffix, String content) throws IOException {
+        Files.writeString(tempDir.resolve("messages_" + localeSuffix + ".properties"), content, StandardCharsets.UTF_8);
     }
 }

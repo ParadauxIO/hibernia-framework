@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -171,19 +172,23 @@ public class DialogManager {
     // ── rendering ─────────────────────────────────────────────────────────────────
 
     private void show(DialogFlow flow, DialogView view) {
-        renderer.show(flow.player(), view, this::resolveText, button -> callbackFor(flow, button));
+        Player viewer = flow.player();
+        renderer.show(viewer, view, text -> resolveText(viewer, text), button -> callbackFor(flow, button));
     }
 
-    private Component resolveText(Text text) {
+    private Component resolveText(Player viewer, Text text) {
         if (text instanceof Text.Literal literal) {
             return literal.component();
         }
         Text.Keyed keyed = (Text.Keyed) text;
-        if (message != null) {
-            return message.component(keyed.key(), keyed.placeholders());
+        if (message == null) {
+            // No Message bean: treat the key as raw MiniMessage so prototyping still renders.
+            return MINI.deserialize(keyed.key());
         }
-        // No Message bean: treat the key as raw MiniMessage so prototyping still renders.
-        return MINI.deserialize(keyed.key());
+        Locale locale = viewer != null ? viewer.locale() : null;
+        return locale != null
+                ? message.component(locale, keyed.key(), keyed.placeholders())
+                : message.component(keyed.key(), keyed.placeholders());
     }
 
     private DialogActionCallback callbackFor(DialogFlow flow, ButtonSpec button) {
@@ -380,12 +385,12 @@ public class DialogManager {
             plugin.getLogger().log(Level.SEVERE,
                     "Dialog " + hm.type.getSimpleName() + " failed in " + where, t);
         }
-        viewer.sendMessage(renderError(key, fallback, values));
+        viewer.sendMessage(renderError(viewer, key, fallback, values));
     }
 
-    private Component renderError(String key, String fallbackPattern, Map<String, ?> values) {
+    private Component renderError(Player viewer, String key, String fallbackPattern, Map<String, ?> values) {
         if (message != null) {
-            return message.componentOr(key, fallbackPattern, values);
+            return message.componentOr(viewer, key, fallbackPattern, values);   // viewer's locale
         }
         String pattern = fallbackPattern;
         for (Map.Entry<String, ?> e : values.entrySet()) {
