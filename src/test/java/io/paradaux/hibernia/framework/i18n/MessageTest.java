@@ -216,6 +216,44 @@ class MessageTest {
     }
 
     @Test
+    void papi_resolvesOperatorTokens_butNotCallerValues() throws Exception {
+        writeMessages("line=%greeting% {name}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin)
+                .placeholders((player, text) -> text.replace("%greeting%", "Hello"));
+
+        // The %token% in the operator pattern resolves; the same token passed as a caller value stays
+        // literal (caller values are inert — PAPI never widens the injection surface for player input).
+        Component out = message.component("line", "name", "%greeting%");
+
+        assertEquals("Hello %greeting%", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out));
+    }
+
+    @Test
+    void papi_resolvesInsidePaletteEntries() throws Exception {
+        writeMessages("""
+                placeholder.brand=%server%
+                line={brand} Store
+                """);
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin)
+                .placeholders((player, text) -> text.replace("%server%", "MyServer"));
+
+        assertEquals("MyServer Store", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(message.component("line")));
+    }
+
+    @Test
+    void placeholderApiSupport_noopsWhenPlaceholderApiAbsent() {
+        PapiSupport papi = new PlaceholderApiSupport();   // PlaceholderAPI is not on the test classpath
+        assertEquals("%player_name%", papi.resolve(null, "%player_name%"));
+        assertEquals("no tokens here", papi.resolve(null, "no tokens here"));
+    }
+
+    @Test
     void componentOr_usesKeyWhenPresentAndFallbackOtherwise() throws Exception {
         writeMessages("hibernia.error.not-found=<red>Missing: {message}");
         stubSaveResourceNoop();

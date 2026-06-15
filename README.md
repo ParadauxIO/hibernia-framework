@@ -26,14 +26,13 @@ The rest of this README is a tour; the guides above are the reference.
 - Dialog support over the Paper Dialog API (`usher`): declarative `@Dialog` screens with typed input read-back and managed navigation.
 - Event listener registration through DI (`ListenerManager`).
 - Semantic exceptions (`NotFoundException`, `ConflictException`, …) thrown from your service layer and rendered to the player automatically, with operator-overridable `hibernia.error.*` message keys.
-- Localisation via templated `properties` files with **per-player locale selection** (ResourceBundle-style `messages_<lang>.properties`, per-key fallback to the base file). MiniMessage/Adventure formatting via tag resolvers: plain placeholder values are escaped (safe for player input), `Component` values (formatted item/player names) render with styling intact, and `Message.rich(...)` passes trusted markup.
+- Localisation via templated `properties` files with **per-player locale selection** (ResourceBundle-style `messages_<lang>.properties`, per-key fallback to the base file) and optional **PlaceholderAPI** (`%token%`) resolution. MiniMessage/Adventure formatting via tag resolvers: plain placeholder values are escaped (safe for player input), `Component` values (formatted item/player names) render with styling intact, and `Message.rich(...)` passes trusted markup.
 - Configuration deserialisation and mapping, including in-place `reload()`.
 - A framework-owned Guice module (`HiberniaModule`) so a plugin's bootstrap is a few lines.
 
 Coming soon:
 - Bi-directional configuration, have set values be reflected in the configuration file.
 - Regularly scheduled task creation (Akin to @Scheduled in Spring)
-- PlaceholderAPI support within the localisation module.
 
 ## Using the framework 
 

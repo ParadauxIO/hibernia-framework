@@ -21,6 +21,7 @@ HiberniaModule hibernia = HiberniaModule.forPlugin(this)
         .dialogs(FindDialog.class)                                 // @Dialog handlers
         .inputBinders(ShopTypeBinder.class)                        // custom dialog InputBinders
         .bedrockSupport(FloodgateBedrockSupport.class)             // optional
+        .placeholders(CustomPapiSupport.class)                     // optional, defaults to PlaceholderApiSupport
         .withoutMessages()                                         // optional, see below
         .build();
 ```
@@ -40,6 +41,7 @@ HiberniaModule hibernia = HiberniaModule.forPlugin(this)
 | `Set<InputBinder<?>>` | from `.inputBinders(...)` |
 | `DialogRenderer` | bound to `PaperDialogRenderer` |
 | `BedrockSupport` | only if `.bedrockSupport(...)` is set; otherwise everyone is treated as Java |
+| `PapiSupport` | bound to `PlaceholderApiSupport` (the reflective PlaceholderAPI bridge); override with `.placeholders(...)` |
 
 The multibinder sets are always created (even when empty), so `CommandManager`, `ListenerManager` and
 `DialogManager` are always injectable.

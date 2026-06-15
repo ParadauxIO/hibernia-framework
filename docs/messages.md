@@ -145,6 +145,37 @@ for. Command and dialog error messages (`hibernia.error.*`) are localized to the
 > The framework selects the locale; **you** supply the translated files. This module still uses
 > `.properties` (not YAML) and the `{name}` placeholder syntax.
 
+## PlaceholderAPI
+
+Operators can write [PlaceholderAPI](https://wiki.placeholderapi.com/) `%token%` placeholders in
+`messages.properties`, and they're filled in per recipient:
+
+```properties
+profile={prefix} <gray>Balance: <green>%vault_eco_balance%</green> · Rank: %vault_rank%
+```
+
+```java
+message.send(player, "profile");   // %vault_eco_balance% / %vault_rank% resolved against `player`
+```
+
+This works automatically when PlaceholderAPI is installed (and is a no-op when it isn't —
+`messages.properties` with `%tokens%` just renders them literally). No extra wiring: `HiberniaModule`
+binds a reflective bridge by default, so the framework takes **no hard dependency** on PlaceholderAPI.
+
+Important details:
+
+- `%token%` resolution is applied only to **operator-authored** text — the message pattern and
+  `placeholder.*` palette entries — and only on paths that have a player: `send(...)`, and the
+  `componentOr(CommandSender, …)` used for command/dialog errors. It is **never** applied to
+  caller-supplied placeholder values, so a player-controlled string can't smuggle in a `%token%`.
+- `component(key, …)` / `format(key, …)` without a recipient resolve server/global placeholders only
+  (null player context).
+- PlaceholderAPI returns plain or MiniMessage-style text; expansions that emit **legacy `§`/`&` colour
+  codes** are not re-coloured (they'd render as literal codes). Prefer MiniMessage-aware expansions.
+- To swap the bridge (a custom engine, or to disable it), implement `PapiSupport` and pass it to
+  `HiberniaModule.forPlugin(...).placeholders(MyPapiSupport.class)`, or set it manually with
+  `message.placeholders(impl)`.
+
 ## `HiberniaPlayer`
 
 A small interface (`getUniqueId()`, `getCurrentName()`) for your own player abstraction.

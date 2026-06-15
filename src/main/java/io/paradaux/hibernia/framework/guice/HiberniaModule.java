@@ -7,6 +7,8 @@ import io.paradaux.hibernia.framework.commander.spi.CommandHandler;
 import io.paradaux.hibernia.framework.commander.spi.ParameterResolver;
 import io.paradaux.hibernia.framework.configurator.ConfigurationLoader;
 import io.paradaux.hibernia.framework.i18n.Message;
+import io.paradaux.hibernia.framework.i18n.PapiSupport;
+import io.paradaux.hibernia.framework.i18n.PlaceholderApiSupport;
 import io.paradaux.hibernia.framework.usher.render.DialogRenderer;
 import io.paradaux.hibernia.framework.usher.render.PaperDialogRenderer;
 import io.paradaux.hibernia.framework.usher.spi.BedrockSupport;
@@ -72,6 +74,7 @@ public final class HiberniaModule extends AbstractModule {
     private final List<Class<? extends DialogHandler>> dialogs;
     private final List<Class<? extends InputBinder<?>>> inputBinders;
     private final Class<? extends BedrockSupport> bedrockSupport;
+    private final Class<? extends PapiSupport> papiSupport;
     private final boolean bindMessage;
 
     private HiberniaModule(Builder builder) {
@@ -82,6 +85,7 @@ public final class HiberniaModule extends AbstractModule {
         this.dialogs = List.copyOf(builder.dialogs);
         this.inputBinders = List.copyOf(builder.inputBinders);
         this.bedrockSupport = builder.bedrockSupport;
+        this.papiSupport = builder.papiSupport;
         this.bindMessage = builder.bindMessage;
         this.configurationLoader = new ConfigurationLoader(plugin);
         builder.configurationPackages.forEach(configurationLoader::scanPackage);
@@ -114,6 +118,10 @@ public final class HiberniaModule extends AbstractModule {
         if (bindMessage) {
             bind(Message.class).asEagerSingleton();
         }
+
+        // PlaceholderAPI bridge for Message %token% resolution. The default is a reflective bridge that
+        // no-ops when PlaceholderAPI isn't installed, so this is safe to bind unconditionally.
+        bind(PapiSupport.class).to(papiSupport);
 
         Multibinder<CommandHandler> handlerBinder = Multibinder.newSetBinder(binder(), CommandHandler.class);
         handlers.forEach(h -> handlerBinder.addBinding().to(h));
@@ -155,6 +163,7 @@ public final class HiberniaModule extends AbstractModule {
         private final List<Class<? extends DialogHandler>> dialogs = new ArrayList<>();
         private final List<Class<? extends InputBinder<?>>> inputBinders = new ArrayList<>();
         private Class<? extends BedrockSupport> bedrockSupport;
+        private Class<? extends PapiSupport> papiSupport = PlaceholderApiSupport.class;
         private boolean bindMessage = true;
 
         private Builder(JavaPlugin plugin) {
@@ -208,6 +217,16 @@ public final class HiberniaModule extends AbstractModule {
          */
         public Builder bedrockSupport(Class<? extends BedrockSupport> impl) {
             this.bedrockSupport = Objects.requireNonNull(impl, "impl");
+            return this;
+        }
+
+        /**
+         * Override the {@link PapiSupport} used by {@link Message} for {@code %token%} resolution. Defaults
+         * to {@link PlaceholderApiSupport} (bridges to PlaceholderAPI when installed, no-ops otherwise).
+         * Bind {@code PapiSupport.NONE}'s class or a custom implementation to change it.
+         */
+        public Builder placeholders(Class<? extends PapiSupport> impl) {
+            this.papiSupport = Objects.requireNonNull(impl, "impl");
             return this;
         }
 

@@ -10,6 +10,7 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -74,12 +75,28 @@ public final class Message {
     private volatile Locale defaultLocale = Locale.ROOT;                 // base bundle
     private volatile Map<Locale, Bundle> bundles = Map.of(Locale.ROOT, Bundle.empty());
     private final Map<Locale, List<Bundle>> chainCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile PapiSupport papi = PapiSupport.NONE;
 
     @Inject
     public Message(JavaPlugin plugin) {
         this.plugin = Objects.requireNonNull(plugin);
         ensureDefaultFile();
         reload();
+    }
+
+    /**
+     * Optional Guice injection point for the PlaceholderAPI bridge — bound by {@code HiberniaModule}.
+     * Absent binding leaves {@link PapiSupport#NONE} (no {@code %token%} resolution).
+     */
+    @Inject(optional = true)
+    void setPapiSupport(PapiSupport papi) {
+        this.papi = Objects.requireNonNull(papi, "papi");
+    }
+
+    /** Manually set the PlaceholderAPI bridge (e.g. in tests or hand-wired plugins). */
+    public Message placeholders(PapiSupport papi) {
+        this.papi = Objects.requireNonNull(papi, "papi");
+        return this;
     }
 
     /**
@@ -150,11 +167,12 @@ public final class Message {
      * Build a {@link Component} for {@code key} in {@code locale}. Placeholder values are bound as
      * MiniMessage tag resolvers, so a value may be a {@link ComponentLike} (a formatted item or player
      * name) and render properly — unlike {@link #format(Locale, String, Map)}, which is a string utility
-     * and would render such a value via {@code toString()}.
+     * and would render such a value via {@code toString()}. ({@code %token%} PlaceholderAPI placeholders
+     * are only resolved on the {@link #send} / {@link #componentOr(CommandSender, String, String, Map)}
+     * paths, where a player context is available.)
      */
     public Component component(Locale locale, String key, Map<String, ?> values) {
-        String pattern = findRaw(locale, key);
-        return new ResolverRender(locale, namespaceOf(key), values).render(pattern != null ? pattern : key);
+        return build(locale, null, key, null, values);
     }
 
     /**
@@ -171,22 +189,37 @@ public final class Message {
         return componentOr(defaultLocale, key, fallbackPattern, values);
     }
 
-    /** {@link #componentOr(Locale, String, String, Map)} using the sender's locale. */
+    /** {@link #componentOr(Locale, String, String, Map)} using the sender's locale and PlaceholderAPI context. */
     public Component componentOr(CommandSender sender, String key, String fallbackPattern, Map<String, ?> values) {
-        return componentOr(localeOf(sender), key, fallbackPattern, values);
+        return build(localeOf(sender), papiPlayer(sender), key, fallbackPattern, values);
     }
 
     public Component componentOr(Locale locale, String key, String fallbackPattern, Map<String, ?> values) {
+        return build(locale, null, key, fallbackPattern, values);
+    }
+
+    /**
+     * Core render: resolve the pattern for {@code locale} (falling back to {@code fallbackPattern}, then
+     * the key itself), and build the component with the placeholder resolvers and the PlaceholderAPI
+     * context {@code papiPlayer} ({@code null} when there is no player).
+     */
+    private Component build(Locale locale, OfflinePlayer papiPlayer, String key, String fallbackPattern,
+                           Map<String, ?> values) {
         String pattern = findRaw(locale, key);
-        return new ResolverRender(locale, namespaceOf(key), values)
-                .render(pattern != null ? pattern : fallbackPattern);
+        if (pattern == null) pattern = fallbackPattern != null ? fallbackPattern : key;
+        return new ResolverRender(locale, papiPlayer, namespaceOf(key), values).render(pattern);
+    }
+
+    private static OfflinePlayer papiPlayer(CommandSender sender) {
+        // Player extends OfflinePlayer; console/command-block senders carry no PlaceholderAPI context.
+        return sender instanceof OfflinePlayer offlinePlayer ? offlinePlayer : null;
     }
 
     // ── sending ───────────────────────────────────────────────────────────────────
 
     /** Send {@code key} to a sender, rendered in their client locale (or the default for non-players). */
     public void send(CommandSender to, String key, Object... kvPairs) {
-        to.sendMessage(component(localeOf(to), key, kvPairs));
+        to.sendMessage(build(localeOf(to), papiPlayer(to), key, null, kvToMap(kvPairs)));
     }
 
     public void send(HiberniaPlayer to, String key, Object... kvPairs) {
@@ -200,21 +233,21 @@ public final class Message {
         }
     }
 
-    /** Send to many recipients; each is rendered in their own locale. */
+    /** Send to many recipients; each is rendered in their own locale and PlaceholderAPI context. */
     public void send(Collection<? extends CommandSender> recipients, String key, Object... kvPairs) {
         Map<String, Object> values = kvToMap(kvPairs);
         for (CommandSender s : recipients) {
-            s.sendMessage(component(localeOf(s), key, values));
+            s.sendMessage(build(localeOf(s), papiPlayer(s), key, null, values));
         }
     }
 
-    /** Broadcast to all online players (each in their own locale) and the console (default locale). */
+    /** Broadcast to all online players (each in their own locale and PlaceholderAPI context) and the console. */
     public void broadcast(String key, Object... kvPairs) {
         Map<String, Object> values = kvToMap(kvPairs);
         for (Player p : Bukkit.getOnlinePlayers()) {
-            p.sendMessage(component(localeOf(p), key, values));
+            p.sendMessage(build(localeOf(p), p, key, null, values));
         }
-        Bukkit.getConsoleSender().sendMessage(component(defaultLocale, key, values));
+        Bukkit.getConsoleSender().sendMessage(build(defaultLocale, null, key, null, values));
     }
 
     private Locale localeOf(CommandSender sender) {
@@ -433,13 +466,15 @@ public final class Message {
      */
     private final class ResolverRender {
         private final List<Bundle> chain;
+        private final OfflinePlayer papiPlayer;
         private final String ns;
         private final Map<String, ?> values;
         private final Map<String, String> nameToTag = new HashMap<>();
         private final List<TagResolver> resolvers = new ArrayList<>();
 
-        ResolverRender(Locale locale, String ns, Map<String, ?> values) {
+        ResolverRender(Locale locale, OfflinePlayer papiPlayer, String ns, Map<String, ?> values) {
             this.chain = chainFor(locale);
+            this.papiPlayer = papiPlayer;
             this.ns = ns;
             this.values = values == null ? Map.of() : values;
         }
@@ -457,6 +492,9 @@ public final class Message {
 
         /** Replace each known {@code {name}} with its generated {@code <tag>}; leave unknowns literal. */
         private String convert(String text) {
+            // Resolve %papi% tokens in operator-authored text (pattern + palette + Rich) — never in the
+            // inert caller values, which bypass convert() and are inserted as escaped literals.
+            text = papi.resolve(papiPlayer, text);
             text = text.replace("{{", LBR).replace("}}", RBR);
             Matcher m = PLACEHOLDER.matcher(text);
             StringBuilder sb = new StringBuilder(text.length() + 16);
