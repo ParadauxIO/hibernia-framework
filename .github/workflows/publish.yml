@@ -79,7 +79,6 @@ jobs:
           path: build/reports/tests/test/
 
       - name: Build & publish
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         run: ./gradlew --no-daemon clean build publish -Pversion=${{ steps.pick.outputs.version }}
         env:
           REPO_USER: ${{ secrets.REPO_USER }}

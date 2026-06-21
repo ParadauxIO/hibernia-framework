@@ -8,6 +8,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.List;
+import java.util.logging.Level;
 
 public class ConfigurationProcessor {
 
@@ -55,10 +56,13 @@ public class ConfigurationProcessor {
                         if (value != null) {
                             field.set(target, value);
                         }
-
-                        // No need to restore accessibility
-                    } catch (IllegalAccessException e) {
-                        plugin.getLogger().warning("Failed to inject config value for path: " + path);
+                    } catch (Exception e) {
+                        // A bad value (unparseable number, unknown enum constant,
+                        // type mismatch) must name the path and field, with the
+                        // cause attached — not vanish into a generic message.
+                        plugin.getLogger().log(Level.WARNING,
+                                "Failed to inject config value '" + path + "' into "
+                                        + clazz.getSimpleName() + "." + field.getName() + ": " + e.getMessage(), e);
                     }
                 });
     }
@@ -82,13 +86,20 @@ public class ConfigurationProcessor {
             return config.contains(path) ? config.getBoolean(path) : Boolean.parseBoolean(defaultValue);
         } else if (type == double.class || type == Double.class) {
             return config.contains(path) ? config.getDouble(path) : Double.parseDouble(defaultValue);
+        } else if (type == float.class || type == Float.class) {
+            return config.contains(path) ? (float) config.getDouble(path) : Float.parseFloat(defaultValue);
         } else if (type == long.class || type == Long.class) {
             return config.contains(path) ? config.getLong(path) : Long.parseLong(defaultValue);
         } else if (type == List.class) {
             return config.getStringList(path);
         } else if (type.isEnum()) {
             String value = config.getString(path, defaultValue);
-            return Enum.valueOf((Class<Enum>) type, value);
+            try {
+                return Enum.valueOf((Class<Enum>) type, value);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Invalid value '" + value + "' for " + path
+                        + "; expected one of " + Arrays.toString(type.getEnumConstants()));
+            }
         }
 
         // For complex types, return the object directly

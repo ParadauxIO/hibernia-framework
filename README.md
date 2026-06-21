@@ -1,22 +1,38 @@
 # Hibernia Framework
 
-This project is a framework I'm working on for building Minecraft plugins with an emphasis on an Event-Service-Dao architecture. An event in this context is anything which causes an action. In a REST API this would usually be a controller, here it would be a command and or game event.
+This project is a framework for building Minecraft plugins with an emphasis on an Event-Service-Dao architecture. An event in this context is anything which causes an action. In a REST API this would usually be a controller, here it would be a command and or game event.
+
+The framework deliberately covers the **entrypoint tier** (commands, event listeners, configuration, messaging) plus the DI glue; the service and persistence tiers belong to your plugin. The framework's job is to make the separation of concerns natural — thin annotated entrypoints, constructor-injected services — not to own your business logic or database.
 
 Check out the AI-Generated documentation which is more-or-less accurate at http://deepwiki.com/paradauxio/hibernia-framework
 
+## Documentation
+
+Full usage guides live in [`docs/`](docs/README.md):
+
+- [Getting started](docs/getting-started.md) — install, the `onEnable` bootstrap, project layout & layering
+- [Dependency injection](docs/dependency-injection.md) — `HiberniaModule`, what it binds, manual wiring
+- [Commands](docs/commands.md) — `@Command`/`@Route`, arguments, resolvers, permissions, async, help
+- [Configuration](docs/configuration.md) — `@ConfigurationComponent` POJOs, supported types, reload
+- [Messages & i18n](docs/messages.md) — `messages.properties`, placeholders, MiniMessage, escaping
+- [Exceptions](docs/exceptions.md) — the HTTP-semantic exceptions and how they render
+- [Events](docs/events.md) — DI-managed Bukkit listeners
+- [Dialogs (Usher)](docs/dialogs.md) — `@Dialog`/`@Screen`/`@Action`, typed inputs, navigation, async
+
+The rest of this README is a tour; the guides above are the reference.
+
 ## Feature List
-- Command registration, handling and routing with Paper and Brigaider support.
-- Localisation via a templated `properties` file. This uses MiniMessage/Adventure for formatting. 
-- Configuration deserialisation and mapping.
+- Command registration, handling and routing with Paper and Brigadier support, validated at registration time (a typo'd route fails loudly at startup, never silently at runtime).
+- Dialog support over the Paper Dialog API (`usher`): declarative `@Dialog` screens with typed input read-back and managed navigation.
+- Event listener registration through DI (`ListenerManager`).
+- Semantic exceptions (`NotFoundException`, `ConflictException`, …) thrown from your service layer and rendered to the player automatically, with operator-overridable `hibernia.error.*` message keys.
+- Localisation via templated `properties` files with **per-player locale selection** (ResourceBundle-style `messages_<lang>.properties`, per-key fallback to the base file) and optional **PlaceholderAPI** (`%token%`) resolution. MiniMessage/Adventure formatting via tag resolvers: plain placeholder values are escaped (safe for player input), `Component` values (formatted item/player names) render with styling intact, and `Message.rich(...)` passes trusted markup.
+- Configuration deserialisation and mapping, including in-place `reload()`.
+- A framework-owned Guice module (`HiberniaModule`) so a plugin's bootstrap is a few lines.
 
 Coming soon:
-- Event listening and lifecycle
 - Bi-directional configuration, have set values be reflected in the configuration file.
 - Regularly scheduled task creation (Akin to @Scheduled in Spring)
-- 
-- PlaceholderAPI support within the localisation module.
-- Framework-created and managed Guice modules which you either add to your own injector or use the framework-controlled injector.
-- Better documentation...
 
 ## Using the framework 
 
@@ -55,7 +71,7 @@ repositories {
 Configure the dependency:
 ```gradle
 dependencies {
-    implementation("io.paradaux:hibernia-framework:1.0.0")
+    implementation("io.paradaux:hibernia-framework:1.0.2")
 }
 ```
 
@@ -64,20 +80,47 @@ dependencies {
     <dependency>
         <groupId>io.paradaux</groupId>
         <artifactId>hibernia-framework</artifactId>
-        <version>1.0.0</version>
+        <version>1.0.2</version>
     </dependency>
 </dependencies>
 ```
 
 This framework includes some useful additional libraries which you can use in your consuming plugins, the former of which is encouraged.
-- Guice 7.0.0
+- Guice 7.0.0 (exposed as an `api` dependency — it is part of the framework's public surface)
 - Reflections
+
+## Bootstrap
+
+`HiberniaModule` wires the whole entrypoint tier in one place. A minimal `onEnable`:
+
+```java
+@Override
+public void onEnable() {
+    HiberniaModule hibernia = HiberniaModule.forPlugin(this)
+            .scanConfiguration("net.example.myplugin.model.config") // @ConfigurationComponent package
+            .handlers(EconomyCommands.class, AdminCommands.class)   // CommandHandler classes
+            .resolvers(FirmPlayerResolver.class)                    // custom ParameterResolvers
+            .listeners(JoinListener.class)                          // Bukkit Listeners
+            .build();
+
+    // Typed config is available before the injector exists, e.g. for a
+    // module that needs database settings:
+    DatabaseConfiguration db = hibernia.configuration(DatabaseConfiguration.class);
+
+    this.injector = Guice.createInjector(hibernia, new DatabaseModule(db), new ServicesModule());
+
+    injector.getInstance(CommandManager.class).registerAll();
+    injector.getInstance(ListenerManager.class).registerAll();
+}
+```
+
+`HiberniaModule` binds: the `JavaPlugin`/`Plugin` instance, the `ConfigurationLoader` and every discovered `@ConfigurationComponent` (as singletons), `Message` (eager singleton — call `.withoutMessages()` if your plugin doesn't bundle a `messages.properties`), and the multibinder sets for handlers, resolvers and listeners. Your own modules only bind your services and persistence layer.
 
 ## Features
 
 ### 1. Annotation-based declarative Command handling:
 ```java
-@Command("eco")
+@Command(value = "eco", description = "Economy commands")
 public class EconomyCommands implements CommandHandler {
     
     @Route("")
@@ -85,9 +128,11 @@ public class EconomyCommands implements CommandHandler {
         // Handles: /eco
     }
     
-    @Route("balance")
-    public void balance(@Sender Player sender) {
-        // Handles: /eco balance
+    @Route("balance [player]")
+    public void balance(@Sender Player sender,
+                        @OptionalArg(value = "player", defaultValue = OptionalArg.SENDER) OfflinePlayer target) {
+        // Handles: /eco balance         (target = sender)
+        //          /eco balance <name>  (target = resolved player)
     }
     
     @Route("give <player> <amount>")
@@ -98,13 +143,18 @@ public class EconomyCommands implements CommandHandler {
 ```
 See https://deepwiki.com/ParadauxIO/hibernia-framework/4.1-defining-commands for more information. 
 
-It supports Brigaider, and automatically registers the commands with Paper. This means tab-support is provided via the use of "resolvers." Several resolvers are baked-in:
-- String
-- BigDecimal
-- Integer
-- OfflinePlayer
+Route syntax: literals are plain tokens, required arguments are `<name>`, optional arguments are `[name]`. Optional arguments must form the tail of the route; the command is executable with or without them, and an omitted optional takes its `defaultValue` (resolved to the parameter type — `OptionalArg.SENDER` defaults to the command sender; an empty default yields `null` for reference types).
 
-It is possible to implement your own by implementing the ParameterResolver interface. The below example auto-completes firms which the player has access to via service method calls.
+Routes are **validated when commands register**: a placeholder with no matching `@Arg`, a required `@Arg` missing from the route, two routes binding the same path (even across handler classes sharing a root), or conflicting argument types at the same position all fail with a descriptive error. A failing handler class is skipped and logged; the plugin's other commands still register. `CommandManager#routeIndex()` exposes the registered routes (pattern, `@Description`, permission, async flag) so help commands can be generated from reality instead of hand-maintained.
+
+It supports Brigadier, and automatically registers the commands with Paper. This means tab-support is provided via the use of "resolvers." Several resolvers are baked-in:
+- String
+- Integer / Long
+- BigDecimal (accepts thousands-separator commas, e.g. `1,000`)
+- Boolean (`true|false|yes|no|y|n|1|0|on|off`)
+- OfflinePlayer (cache-only resolution — safe for Bedrock/Floodgate names)
+
+It is possible to implement your own by implementing the ParameterResolver interface. **Threading note:** `suggestions(...)` is always called off the main thread, and `resolve(...)` runs on an async worker for `@Async` routes — back resolvers with service-managed caches, not live Bukkit state. The below example auto-completes firms which the player has access to via service method calls.
 
 ```java
 @Singleton
@@ -180,12 +230,27 @@ Within the framework there are semantic exceptions you can throw from within ser
 - ConflictException: When a command tries to do something which causes a conflict (e.g., for use with an RDMS with a primary key / unique constraint violation.) Analogous to a HTTP 409
 - ExceedsLimitException: When a command sender attempts to exceed a limit imposed by a command (cooldowns, value constraints etc) 
 - InternalException: When an unexpected error occurs within the framework, or within a consuming plugin.
-- NoPermissionException: Thrown internally to the framework when permission checks fail, as these are thrown within the framework, it is not possible to catch within an Event/Command
+- NoPermissionException: When a permission check fails inside your service layer (the framework also uses the same message key for its own `@Permission` denials).
 - NotFoundException: When a resource is not found. Analogous to a HTTP 404
-  
-These extend RuntimeException, in the future they will extend generic `CommandException` and or `EventException` once the exception functionality is more built out. 
 
-The intended pattern is that you would throw these exceptions within your service layer, and catch them in your command handler with a message associated, or allow the framework-defaults.
+These extend RuntimeException. **Throw them from your service layer and let them propagate out of the command handler** — the framework catches them and sends the player a formatted message. Each maps to a key in `messages.properties` (when a `Message` bean is bound), falling back to a built-in default otherwise:
+
+| Exception | Message key | Default behaviour |
+|---|---|---|
+| `BadCommandException` | `hibernia.error.bad-command` | exception message, red |
+| `NotFoundException` | `hibernia.error.not-found` | exception message, red |
+| `ConflictException` | `hibernia.error.conflict` | exception message, red |
+| `ExceedsLimitException` | `hibernia.error.exceeds-limit` | exception message, red |
+| `NoPermissionException` | `hibernia.error.no-permission` | generic denial message |
+| invalid/unresolvable argument | `hibernia.error.invalid-argument` | explanation, red |
+| anything else / `InternalException` | `hibernia.error.internal` | generic message; **stack trace logged server-side, never shown to the player** |
+
+Override any of these keys in your plugin's `messages.properties` (the `{message}` placeholder carries the exception text) — e.g.:
+
+```properties
+hibernia.error.not-found={prefix} <red>{message}</red>
+hibernia.error.no-permission={prefix} <red>You can't do that.</red>
+```
 
 ### 3. Configuration
 
@@ -216,12 +281,13 @@ public class DatabaseConfiguration {
 }
 ```
 
-The path is used to represent the path within config.yml where the value is found. If the value is undefined it takes the default value. Empty string is a valid value which won't be replaced with the default value.
-The framework contains the logic to scan a package for ConfigurationComponent-annotated classes and create a Singleton instance for dependency injection purposes. Two-way syncronisaiton between the Singleton and the configuration file is not yet supported.
+The path is used to represent the path within config.yml where the value is found. If the value is undefined it takes the default value. Empty string is a valid value which won't be replaced with the default value. Supported field types: `String`, `int`, `long`, `double`, `float`, `boolean` (and boxed forms), `List<String>`, and enums (an invalid enum value is logged with the allowed constants).
 
-### Localisation and Internationalisation
+The framework contains the logic to scan a package for ConfigurationComponent-annotated classes and create a Singleton instance for dependency injection purposes (`HiberniaModule` binds them automatically). `ConfigurationLoader#reload()` re-reads `config.yml` and re-injects every component **in place** — bound singletons keep their identity, so a `/myplugin reload` command is one service call. Two-way synchronisation (writing values back to the file) is not yet supported.
 
-The framework includes a simple templated localisation system, which allows for the use of a `messages.properties` and a `Message` class which has helper methods for sending messages using keys from this file, along with key-value placeholders and their replacements.
+### Localisation
+
+The framework includes a templated message system, which allows for the use of a `messages.properties` and a `Message` class which has helper methods for sending messages using keys from this file, along with key-value placeholders and their replacements. It is **locale-aware**: drop sibling `messages_<lang>.properties` files (e.g. `messages_ga.properties`) and each player is messaged in their own client locale, with per-key fallback to the base file. See **[docs/messages.md](docs/messages.md#locales)** for the full guide.
 
 Example:
 ```properties
@@ -251,8 +317,7 @@ business.firm.disband.broadcast={prefix} {secbegin}{firm}{secend} has been disba
     public void disband(@Sender Player sender, @Arg("firm") String firm) {
         Firm f = firms.getFirmByNameOrId(firm);
         if (!firms.isProprietor(firm, sender.getUniqueId())) {
-            message.send(sender, "business.general.no-permission");
-            return;
+            throw new NoPermissionException("You are not the proprietor of " + firm);
         }
     
         firms.disbandFirm(firm, sender.getUniqueId());
@@ -261,128 +326,100 @@ business.firm.disband.broadcast={prefix} {secbegin}{firm}{secend} has been disba
     }
 ```
 
-A sender has to be either a CommandSender (e.g., Player) or a custom class which implements the `HiberniaPlayer` interface. This is then followed by the key-value pairs as varargs, where the first value is the placeholder you wish to replace, and the second is the value to put to that placeholder. 
+A sender has to be either a CommandSender (e.g., Player), a UUID, or a custom class which implements the `HiberniaPlayer` interface (resolved by UUID). This is then followed by the key-value pairs as varargs, where the first value is the placeholder you wish to replace, and the second is the value to put to that placeholder. 
 This is done in the above example to fill in the firm name in this business/company plugin.
 
-## Guice Glue
+**Placeholder values are inert by default**: a plain value is inserted as literal text (its MiniMessage tags and braces never expand), so player-controlled strings can't inject markup or clickable components. Pass a **`Component`** value (e.g. `itemStack.displayName()`) and it renders with its styling intact; wrap a string in **`Message.rich("<green>$1,000</green>")`** to pass trusted operator markup. See **[docs/messages.md](docs/messages.md#placeholder-value-types)**.
 
-It's expected to use this framework in conjunction with Guice, if you are not familiar with Guice use other resources at first to get yourself acquainted with the library or the general principles of dependency injection. 
+### 4. Dialogs (Usher)
 
-It's intended to abstract this module creation away into the framework itself, with the ability to add additional module by a framework-controlled injector, although this is not yet implemted. Below are examples of the guice configuration for another of my plugins.
+`usher` is to Paper's [Dialog API](https://docs.papermc.io/paper/dev/dialogs/) what `commander` is to Brigadier: a declarative, DI-wired, annotation-driven layer that removes the boilerplate of building dialogs and reading their inputs back by hand.
 
-### Main module
-
-Registers the JavaPlugin instance (Business in this example) as well as services. 
-```java
-public class BusinessModule extends AbstractModule {
-
-    private final Business business;
-    private final ConfigurationLoader configurationLoader;
-
-    public BusinessModule(Business business, ConfigurationLoader configurationLoader) {
-        this.business = business;
-        this.configurationLoader = configurationLoader;
-    }
-
-    @Override
-    protected void configure() {
-        bind(Business.class).toInstance(business);
-        bind(ConfigurationLoader.class).toInstance(configurationLoader);
-
-        // Automatically bind all configuration components
-        for (Map.Entry<Class<?>, Object> entry : configurationLoader.getComponents().entrySet()) {
-            @SuppressWarnings("unchecked")
-            Class<Object> key = (Class<Object>) entry.getKey();
-            Object value = entry.getValue();
-            bind(key).toInstance(value);
-        }
-
-        // Framework Beans
-        bind(Message.class).asEagerSingleton();
-
-        // Bind services
-        bind(FirmAreaShopService.class).to(FirmAreaShopServiceImpl.class).in(Singleton.class);
-        bind(FirmRoleService.class).to(FirmRoleServiceImpl.class).in(Singleton.class);
-        bind(FirmSalesService.class).to(FirmSalesServiceImpl.class).in(Singleton.class);
-        bind(FirmService.class).to(FirmServiceImpl.class).in(Singleton.class);
-        bind(FirmStaffService.class).to(FirmStaffServiceImpl.class).in(Singleton.class);
-        bind(FirmTransactionService.class).to(FirmTransactionServiceImpl.class).in(Singleton.class);
-        bind(FirmRequestService.class).to(FirmRequestServiceImpl.class).in(Singleton.class);
-        bind(FirmPlayerService.class).to(FirmPlayerServiceImpl.class).in(Singleton.class);
-
-        // Bind Jobs
-        bind(ExpireRequestsJob.class).in(Singleton.class);
-    }
-}
-``` 
-
-### Commander module
-This is the module which registers argument resolvers (see https://deepwiki.com/ParadauxIO/hibernia-framework/4.3-parameter-resolvers) as well as the commands themselves. I also register the Internationalisation portion of the framework here.
-
-
-
+A `@Dialog` handler declares `@Screen` methods (each returns a `DialogView`) and `@Action` methods (run when a button is clicked). All the screens of one handler form a single navigable flow sharing a `@Model` object:
 
 ```java
-public final class CommanderModule extends AbstractModule {
+@Dialog("find")
+public final class FindDialog implements DialogHandler {
 
-    private final JavaPlugin plugin;
+    @Inject FindTaskFactory tasks;   // constructor/field injection like any handler
 
-    public CommanderModule(JavaPlugin plugin) {
-        this.plugin = plugin;
+    @Screen   // the default "main" screen
+    public DialogView main(@Model FindState state, DialogFlow flow) {
+        return DialogView.multiAction("find.title")
+                .toggle("fuzzy", "find.fuzzy", "opt.on", "opt.off", state.fuzzy())
+                .button("find.search", "submit")     // → @Action("submit")
+                .open("find.filters", "filters")      // → opens the "filters" screen
+                .exit("button.close")
+                .build();
     }
 
-    @Override
-    protected void configure() {
-        // Bind both JavaPlugin and Plugin to the running plugin instance
-        bind(JavaPlugin.class).toInstance(plugin);
-        bind(Plugin.class).toInstance(plugin);
+    @Screen("filters")
+    public DialogView filters(@Model FindState state) {
+        return DialogView.confirmation("find.filters.title")
+                .confirm("button.save", "applyFilters")
+                .deny("button.back")                  // closes (or use a @Action that calls flow.back())
+                .build();
+    }
 
-        Multibinder<CommandHandler> handlerBinder =
-                Multibinder.newSetBinder(binder(), CommandHandler.class);
-
-        Multibinder<ParameterResolver<?>> prm =
-                Multibinder.newSetBinder(binder(), new TypeLiteral<>() {});
-        prm.addBinding().to(FirmPlayerResolver.class);
-
-        handlerBinder.addBinding().to(FirmCommands.class);
-        handlerBinder.addBinding().to(HelpCommands.class);
-        handlerBinder.addBinding().to(MiscCommands.class);
-        handlerBinder.addBinding().to(RequestCommands.class);
-        handlerBinder.addBinding().to(RoleCommands.class);
-        handlerBinder.addBinding().to(StaffCommands.class);
-        handlerBinder.addBinding().to(ReloadCommand.class);
-        handlerBinder.addBinding().to(TestCommand.class);
+    @Action("submit")
+    public void submit(Player viewer, @Input("fuzzy") boolean fuzzy,
+                       @Model FindState state, DialogFlow flow) {
+        state.setFuzzy(fuzzy);                        // typed — no view.getText(...).equals("enabled")
+        flow.await(tasks.find(state), Text.key("find.querying"), (results, f) -> {
+            f.close();
+            // … show results
+        });
     }
 }
 ```
 
-## Guice enablement / Framework initialisation
+> The viewer is injected by type (`Player`/`Audience`/`CommandSender`) — dialogs have no positional
+> arguments, so there's no `@Sender`.
 
-Creating the injector/initialising the framework in on enable:
+Open a flow from a command (or anywhere) with the injected `DialogManager`:
+
 ```java
-   @Override
-    public void onEnable() {
-        getLogger().info("Loading configuration...");
+dialogManager.open(player, FindDialog.class, new FindState(item));
+```
 
-        // 1) Load typed config components
-        ConfigurationLoader configLoader = new ConfigurationLoader(this);
-        configLoader.scanPackage("net.democracycraft.business.model.config"); // Wherever your @ConfigurationComponent beans are 
+Key pieces, each the dialog-tier cousin of something `commander` already has:
 
-        // 2) Create the injector, wiring:
-        //    - BusinessModule (binds plugin + all config components)
-        //    - DatabaseModule (needs the typed DatabaseConfiguration)
-        //    - CommanderModule (commands)
-        getLogger().info("Setting up dependency injection...");
-        this.injector = Guice.createInjector(
-                new BusinessModule(this, configLoader),
-                new CommanderModule(this)
-        );
+- **Typed input readback** — `@Input("key") T` resolves through an `InputBinder<T>` (the analogue of `ParameterResolver`). Built-ins cover `String`, `boolean`, `int`, `long`, `float`, `double`, and **any enum** (an option input whose ids are the enum constant names); register custom binders via `HiberniaModule.inputBinders(...)`. An on/off `.toggle(...)` reads back as a plain `boolean`.
+- **`DialogFlow`** owns navigation — `flow.open("filters")`, `flow.back()`, `flow.refresh()`, `flow.close()` — so screens stop threading `Supplier<Dialog> previous` by hand. `flow.await(future, waitText, onDone)` shows a wait-screen, runs the future off the main thread, and hands you the result back on the main thread.
+- **`DialogView`** is a renderer-agnostic spec; all text is a `Message` key (or `Text.of(component)`), so dialog labels are translatable like everything else. The only class touching Paper's dialog runtime is `PaperDialogRenderer`.
+- **Errors** thrown from an `@Action` (including the framework's `NotFoundException`/`ConflictException`/… propagated from your services) render to the viewer through the same `hibernia.error.*` keys as command feedback.
+- **Bedrock** — bind a Floodgate-backed `BedrockSupport` via `HiberniaModule.bedrockSupport(...)`; handlers branch on `flow.isBedrockViewer()`.
 
-        // 3) Register commands (DI-managed)
-        injector.getInstance(CommandManager.class).registerAll();
+Wire it up in the bootstrap module:
+
+```java
+HiberniaModule.forPlugin(this)
+        .dialogs(FindDialog.class)
+        .inputBinders(ShopTypeBinder.class)   // optional custom binders
+        // .bedrockSupport(FloodgateBedrockSupport.class)
+        .build();
+// …then, after creating the injector, dialogs are shown on demand via DialogManager.open(...).
+```
+
+> Registry-backed dialog types (`dialogList`, `serverLinks`) are not yet wrapped — `usher` currently covers the dynamic `notice`/`confirmation`/`multiAction` dialogs, which is what gameplay commands use.
+
+**→ Full guide: [docs/dialogs.md](docs/dialogs.md).** Commands: [docs/commands.md](docs/commands.md) · Configuration: [docs/configuration.md](docs/configuration.md) · Messages: [docs/messages.md](docs/messages.md) · Exceptions: [docs/exceptions.md](docs/exceptions.md) · Events: [docs/events.md](docs/events.md).
+
+## Guice Glue
+
+It's expected to use this framework in conjunction with Guice; if you are not familiar with Guice use other resources at first to get yourself acquainted with the library or the general principles of dependency injection.
+
+`HiberniaModule` (see *Bootstrap* above) replaces the hand-written plugin/commander modules older consumers used. Your remaining modules bind only your own tiers, e.g.:
+
+```java
+public class ServicesModule extends AbstractModule {
+    @Override
+    protected void configure() {
+        bind(FirmService.class).to(FirmServiceImpl.class).in(Singleton.class);
+        bind(FirmStaffService.class).to(FirmStaffServiceImpl.class).in(Singleton.class);
+        // ... services and persistence only — the framework owns the rest
     }
-``` 
+}
+```
 
-At this point, if you managed to get all that working with this shoddy documentation, hats off to you. It should be good enough for an experienced developer who isn't afraid of looking into library internals.
-A proper wiki will be created when it's intended that third-party contributions to the framework are possible, and that there are other plugins making use.
-
+If you need lower-level control (e.g. binding handlers conditionally), the underlying multibinders are plain Guice and can still be declared by hand: `Multibinder.newSetBinder(binder(), CommandHandler.class)`, `Multibinder.newSetBinder(binder(), new TypeLiteral<ParameterResolver<?>>() {})` and `Multibinder.newSetBinder(binder(), Listener.class)`.

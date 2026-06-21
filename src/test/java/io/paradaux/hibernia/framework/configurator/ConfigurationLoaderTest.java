@@ -7,9 +7,13 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -63,11 +67,40 @@ class ConfigurationLoaderTest {
     }
 
     @Test
-    void scanPackage_logsFailureWhenInstantiationFails() {
+    void scanPackage_logsFailureWithCauseWhenInstantiationFails() {
         ConfigurationLoader loader = new ConfigurationLoader(plugin);
 
         loader.scanPackage("io.paradaux.hibernia.framework.configurator");
 
-        verify(logger).severe(org.mockito.ArgumentMatchers.contains(FailingComponent.class.getName()));
+        // The cause must be attached, not swallowed into a bare message.
+        verify(logger).log(eq(Level.SEVERE), contains(FailingComponent.class.getName()), any(Throwable.class));
+    }
+
+    @Test
+    void getComponent_throwsWithDiagnosticWhenComponentMissing() {
+        ConfigurationLoader loader = new ConfigurationLoader(plugin);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> loader.getComponent(GoodComponent.class));
+        assertTrue(ex.getMessage().contains("scanPackage"));
+    }
+
+    @Test
+    void reload_reReadsConfigIntoExistingComponentInstances() {
+        when(config.contains("loader.value")).thenReturn(true);
+        when(config.getString("loader.value", "fallback")).thenReturn("loaded", "reloaded");
+
+        ConfigurationLoader loader = new ConfigurationLoader(plugin);
+        loader.scanPackage("io.paradaux.hibernia.framework.configurator");
+
+        GoodComponent component = loader.getComponent(GoodComponent.class);
+        assertEquals("loaded", component.value);
+
+        loader.reload();
+
+        verify(plugin).reloadConfig();
+        // Same instance, new value — bound singletons see the change.
+        assertSame(component, loader.getComponent(GoodComponent.class));
+        assertEquals("reloaded", component.value);
     }
 }

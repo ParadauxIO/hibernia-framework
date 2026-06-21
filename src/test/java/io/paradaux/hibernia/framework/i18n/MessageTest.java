@@ -98,7 +98,7 @@ class MessageTest {
     }
 
     @Test
-    void send_hiberniaPlayerAndUuid_routesThroughBukkitPlayerLookup() throws Exception {
+    void send_hiberniaPlayerAndUuid_resolveByUuid() throws Exception {
         writeMessages("chat=Hello {name}");
         stubSaveResourceNoop();
 
@@ -107,10 +107,11 @@ class MessageTest {
         HiberniaPlayer hp = mock(HiberniaPlayer.class);
         UUID uuid = UUID.randomUUID();
 
-        when(hp.getCurrentName()).thenReturn("Alex");
+        // HiberniaPlayer routing must use the stable UUID, not the (possibly
+        // stale) current name.
+        when(hp.getUniqueId()).thenReturn(uuid);
 
         try (MockedStatic<Bukkit> bukkit = org.mockito.Mockito.mockStatic(Bukkit.class)) {
-            bukkit.when(() -> Bukkit.getPlayer("Alex")).thenReturn(player);
             bukkit.when(() -> Bukkit.getPlayer(uuid)).thenReturn(player);
 
             message.send(hp, "chat", "name", "Sam");
@@ -118,6 +119,153 @@ class MessageTest {
 
             verify(player, org.mockito.Mockito.times(2)).sendMessage(any(Component.class));
         }
+    }
+
+    @Test
+    void format_escapesMiniMessageTagsInUserValues() throws Exception {
+        writeMessages("chat=Hello {name}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Component out = message.component("chat", "name", "<red>Hacker</red>");
+
+        // The tags must render literally, not as markup.
+        String plain = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out);
+        assertEquals("Hello <red>Hacker</red>", plain);
+    }
+
+    @Test
+    void format_userValuesCannotExpandPlaceholders() throws Exception {
+        writeMessages("""
+                placeholder.prefix=[SECRET]
+                chat=Hello {name}
+                """);
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        String out = message.format("chat", Map.of("name", "{prefix}"));
+
+        // A player-controlled value containing {prefix} must stay literal.
+        assertEquals("Hello {prefix}", out);
+    }
+
+    @Test
+    void format_richValuesPassMarkupThrough() throws Exception {
+        writeMessages("chat=Hello {name}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Component out = message.component("chat", Map.of("name", Message.rich("<red>Trusted</red>")));
+
+        String plain = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out);
+        // Markup parsed: tags do not appear in the plain text.
+        assertEquals("Hello Trusted", plain);
+    }
+
+    @Test
+    void component_rendersComponentValuedPlaceholder_preservingFormatting() throws Exception {
+        writeMessages("bought=<gray>You bought {item}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Component item = Component.text("Diamond Sword")
+                .color(net.kyori.adventure.text.format.NamedTextColor.RED);
+
+        Component out = message.component("bought", "item", item);
+
+        // The Component was inserted (not toString()'d): its text and colour survive.
+        assertEquals("You bought Diamond Sword", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out));
+        String mmOut = net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(out);
+        assertTrue(mmOut.contains("Diamond Sword"));
+        assertTrue(mmOut.contains("red"));   // the placeholder's own colour, not toString garbage
+    }
+
+    @Test
+    void component_nestedPalettePlaceholdersResolveRecursively() throws Exception {
+        writeMessages("""
+                placeholder.brand=<bold>{label}</bold>
+                placeholder.label=ACME
+                line={brand} Store
+                """);
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Component out = message.component("line");
+
+        assertEquals("ACME Store", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out));
+    }
+
+    @Test
+    void component_callerValueOverridesPalettePlaceholder() throws Exception {
+        writeMessages("""
+                placeholder.name=DefaultName
+                greet=Hi {name}
+                """);
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+
+        assertEquals("Hi DefaultName", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(message.component("greet")));
+        assertEquals("Hi Alex", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(message.component("greet", "name", "Alex")));
+    }
+
+    @Test
+    void papi_resolvesOperatorTokens_butNotCallerValues() throws Exception {
+        writeMessages("line=%greeting% {name}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin)
+                .placeholders((player, text) -> text.replace("%greeting%", "Hello"));
+
+        // The %token% in the operator pattern resolves; the same token passed as a caller value stays
+        // literal (caller values are inert — PAPI never widens the injection surface for player input).
+        Component out = message.component("line", "name", "%greeting%");
+
+        assertEquals("Hello %greeting%", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(out));
+    }
+
+    @Test
+    void papi_resolvesInsidePaletteEntries() throws Exception {
+        writeMessages("""
+                placeholder.brand=%server%
+                line={brand} Store
+                """);
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin)
+                .placeholders((player, text) -> text.replace("%server%", "MyServer"));
+
+        assertEquals("MyServer Store", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(message.component("line")));
+    }
+
+    @Test
+    void placeholderApiSupport_noopsWhenPlaceholderApiAbsent() {
+        PapiSupport papi = new PlaceholderApiSupport();   // PlaceholderAPI is not on the test classpath
+        assertEquals("%player_name%", papi.resolve(null, "%player_name%"));
+        assertEquals("no tokens here", papi.resolve(null, "no tokens here"));
+    }
+
+    @Test
+    void componentOr_usesKeyWhenPresentAndFallbackOtherwise() throws Exception {
+        writeMessages("hibernia.error.not-found=<red>Missing: {message}");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        var serializer = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText();
+
+        Component fromKey = message.componentOr("hibernia.error.not-found", "<red>{message}</red>", "message", "thing");
+        assertEquals("Missing: thing", serializer.serialize(fromKey));
+
+        Component fromFallback = message.componentOr("hibernia.error.conflict", "<red>{message}</red>", "message", "clash");
+        assertEquals("clash", serializer.serialize(fromFallback));
     }
 
     @Test
@@ -171,11 +319,95 @@ class MessageTest {
         assertEquals("After", message.format("chat"));
     }
 
+    // ── per-locale bundles ───────────────────────────────────────────────────
+
+    @Test
+    void format_selectsLocaleBundle_andFallsBackPerKey() throws Exception {
+        writeMessages("""
+                greeting=Hello {name}
+                only.base=Base only
+                """);
+        writeBundle("ga", """
+                greeting=Dia duit {name}
+                """);   // note: 'only.base' is NOT translated
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+
+        // locale-specific key
+        assertEquals("Dia duit Alex", message.format(java.util.Locale.of("ga"), "greeting", "name", "Alex"));
+        // base key
+        assertEquals("Hello Alex", message.format(java.util.Locale.ENGLISH, "greeting", "name", "Alex"));
+        // per-key fallback: missing in ga → base text
+        assertEquals("Base only", message.format(java.util.Locale.of("ga"), "only.base"));
+    }
+
+    @Test
+    void format_countryFallsBackToLanguageThenBase() throws Exception {
+        writeMessages("k=base");
+        writeBundle("pt", "k=portugues");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+
+        // pt_BR has no bundle → falls back to pt
+        assertEquals("portugues", message.format(java.util.Locale.of("pt", "BR"), "k"));
+        // fr has no bundle → base
+        assertEquals("base", message.format(java.util.Locale.of("fr"), "k"));
+    }
+
+    @Test
+    void send_rendersInPlayerLocale() throws Exception {
+        writeMessages("greeting=Hello");
+        writeBundle("ga", "greeting=Dia duit");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+        Player player = mock(Player.class);
+        when(player.locale()).thenReturn(java.util.Locale.of("ga"));
+
+        message.send(player, "greeting");
+
+        org.mockito.ArgumentCaptor<Component> captor = org.mockito.ArgumentCaptor.forClass(Component.class);
+        verify(player).sendMessage(captor.capture());
+        assertEquals("Dia duit", net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(captor.getValue()));
+    }
+
+    @Test
+    void availableLocales_includesBaseAndTranslations() throws Exception {
+        writeMessages("k=v");
+        writeBundle("ga", "k=v");
+        writeBundle("pt_BR", "k=v");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin);
+
+        assertTrue(message.availableLocales().contains(java.util.Locale.ROOT));
+        assertTrue(message.availableLocales().contains(java.util.Locale.of("ga")));
+        assertTrue(message.availableLocales().contains(java.util.Locale.of("pt", "BR")));
+    }
+
+    @Test
+    void defaultLocale_appliesToNonPlayerSenders() throws Exception {
+        writeMessages("k=base");
+        writeBundle("ga", "k=as Gaeilge");
+        stubSaveResourceNoop();
+
+        Message message = new Message(plugin).defaultLocale(java.util.Locale.of("ga"));
+
+        assertEquals("as Gaeilge", message.format("k"));   // no-locale overload uses the default
+    }
+
     private void stubSaveResourceNoop() {
         doAnswer(invocation -> null).when(plugin).saveResource(anyString(), anyBoolean());
     }
 
     private void writeMessages(String content) throws IOException {
         Files.writeString(tempDir.resolve("messages.properties"), content, StandardCharsets.UTF_8);
+    }
+
+    private void writeBundle(String localeSuffix, String content) throws IOException {
+        Files.writeString(tempDir.resolve("messages_" + localeSuffix + ".properties"), content, StandardCharsets.UTF_8);
     }
 }

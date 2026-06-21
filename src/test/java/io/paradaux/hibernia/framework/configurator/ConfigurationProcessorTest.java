@@ -258,6 +258,49 @@ class ConfigurationProcessorTest {
         assertEquals(Difficulty.NORMAL, target.difficulty);
     }
 
+    // ── float injection ──────────────────────────────────────────────────────
+
+    static class FloatTarget {
+        @ConfigurationValue(path = "render.scale", defaultValue = "1.5")
+        float scale;
+    }
+
+    @Test
+    void process_injectsFloatValue() {
+        when(config.contains("render.scale")).thenReturn(true);
+        when(config.getDouble("render.scale")).thenReturn(2.5);
+
+        FloatTarget target = new FloatTarget();
+        processor.process(target);
+
+        assertEquals(2.5f, target.scale, 1e-6);
+    }
+
+    @Test
+    void process_usesDefaultWhenPathAbsent_float() {
+        when(config.contains("render.scale")).thenReturn(false);
+
+        FloatTarget target = new FloatTarget();
+        processor.process(target);
+
+        assertEquals(1.5f, target.scale, 1e-6);
+    }
+
+    // ── invalid enum value logged with diagnostics, not swallowed ───────────
+
+    @Test
+    void process_invalidEnumValue_logsPathFieldAndAllowedValues() {
+        when(config.contains("game.difficulty")).thenReturn(true);
+        when(config.getString("game.difficulty", "NORMAL")).thenReturn("IMPOSSIBLE");
+
+        EnumTarget target = new EnumTarget();
+        processor.process(target);
+
+        assertNull(target.difficulty);
+        verify(logger).log(eq(java.util.logging.Level.WARNING),
+                contains("game.difficulty"), any(Throwable.class));
+    }
+
     // ── unannotated fields untouched ─────────────────────────────────────────
 
     static class MixedTarget {

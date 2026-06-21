@@ -33,10 +33,10 @@ All commands use the Gradle wrapper. On Windows use `gradlew.bat`, on Unix use `
 
 ## Test Commands
 
-No test framework is currently configured. The `src/test/` directory does not exist.
-Lombok test annotation processing is declared in `build.gradle.kts` for future use.
-
-If tests are added (expected: JUnit 5), the commands would be:
+JUnit 5 + Mockito, with JaCoCo coverage reports (XML + HTML under
+`build/reports/jacoco/`). The suite covers the commander (registration
+validation, dispatch, exception mapping), configurator, i18n, resolvers,
+exceptions, utils and the HiberniaModule bootstrap.
 
 ```bash
 # Run all tests
@@ -51,6 +51,9 @@ If tests are added (expected: JUnit 5), the commands would be:
 # Run tests matching a pattern
 ./gradlew test --tests "*StringUtils*"
 ```
+
+> Gradle 8.14 cannot run on Java 25. If the system `java` is newer than 21,
+> pass `-Dorg.gradle.java.home=<path-to-jdk-21>` (e.g. `~/.jdks/jdk-21.0.11`).
 
 ## Linting / Static Analysis
 
@@ -69,27 +72,42 @@ GitHub Actions workflow at `.github/workflows/publish.yml`:
 ```
 src/main/java/io/paradaux/hibernia/framework/
 ├── commander/                 # Command framework core
-│   ├── CommandManager.java    # Main orchestrator (~460 lines)
-│   ├── annotations/           # @Command, @Route, @Arg, @Sender, @Permission, @Async, etc.
-│   ├── resolvers/             # BigDecimal, Integer, OfflinePlayer, String resolvers
-│   └── spi/                   # CommandHandler, ParameterResolver<T>, SuggestionProvider
-├── configurator/              # Annotation-based config injection
+│   ├── CommandManager.java    # Main orchestrator (validation, dispatch, error mapping)
+│   ├── RouteInfo.java         # Public route metadata record (for help generation)
+│   ├── annotations/           # @Command, @Route, @Arg, @OptionalArg, @Sender, @Permission, @Async, etc.
+│   ├── arguments/             # Paper CustomArgumentType extensions (BigDecimalArgumentType)
+│   ├── resolvers/             # BigDecimal, Boolean, Integer, Long, OfflinePlayer, String resolvers
+│   └── spi/                   # CommandHandler, ParameterResolver<T>
+├── configurator/              # Annotation-based config injection (+ in-place reload())
 │   ├── ConfigurationLoader.java
 │   ├── ConfigurationProcessor.java
 │   └── annotations/           # @ConfigurationComponent, @ConfigurationValue
-├── exceptions/                # Unchecked domain exceptions (6 classes)
-├── i18n/                      # Message.java — i18n with MiniMessage
+├── events/                    # ListenerManager — DI-managed Bukkit listener registration
+├── exceptions/                # Unchecked domain exceptions (6 classes, mapped to hibernia.error.* messages)
+├── guice/                     # HiberniaModule — framework-owned Guice bootstrap module
+├── i18n/                      # Message.java — templated messaging with MiniMessage (values escaped by default)
 ├── models/                    # HiberniaPlayer interface
+├── usher/                     # Dialog framework over Paper's Dialog API (commander-style)
+│   ├── DialogManager.java     # orchestrator: index handlers, open flows, route clicks, error mapping
+│   ├── DialogView.java        # renderer-agnostic screen spec (fluent builder, fully unit-tested)
+│   ├── DialogFlow.java        # per-viewer navigation back-stack + async await()
+│   ├── DialogContext.java / Text.java / ButtonSpec.java
+│   ├── annotations/           # @Dialog, @Screen, @Action, @Input, @Model
+│   ├── input/                 # DialogInputSpec (text/bool/toggle/option/number)
+│   ├── binders/               # BuiltinInputBinders (String/Boolean/Integer/Long/Float/Double)
+│   ├── render/                # DialogRenderer iface + PaperDialogRenderer (the only Paper-coupled class)
+│   └── spi/                   # DialogHandler, InputBinder<T>, BedrockSupport
 └── utils/                     # StringUtils
 ```
 
 ## Key Dependencies
 
 - `io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT` (compileOnly)
-- `com.google.inject:guice:7.0.0` (DI)
+- `com.google.inject:guice:7.0.0` (DI — `api` scope: HiberniaModule/CommandManager expose Guice types)
 - `com.google.guava:guava:33.2.1-jre`
 - `org.reflections:reflections:0.10.2` (classpath scanning)
 - `org.projectlombok:lombok:1.18.34` (compileOnly + annotation processor)
+- Shadow plugin is `com.gradleup.shadow` 9.x (shadowJar keeps the `shaded` classifier; the thin jar stays the published artifact)
 
 ## Code Style Guidelines
 
