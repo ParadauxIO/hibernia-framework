@@ -88,9 +88,11 @@ public final class PropertiesDefaultsMerger {
         Properties props = new Properties();
         try {
             props.load(new StringReader(content));
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             // A malformed on-disk file shouldn't crash boot; treat it as having no keys
             // (the worst case is re-appending defaults, which the operator can reconcile).
+            // Note: Properties.load throws an unchecked IllegalArgumentException on a malformed
+            // \\uXXXX escape, not IOException — so the catch must include RuntimeException.
             return Set.of();
         }
         return props.stringPropertyNames();

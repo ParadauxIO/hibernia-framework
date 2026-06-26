@@ -137,5 +137,7 @@ class HelpGeneratorTest {
         assertEquals(3, gen.visibleRoutes(allowAll(), "eco").size());
         assertEquals(2, gen.pageCount(allowAll(), "eco", 2));
         assertTrue(PLAIN.serialize(gen.render(allowAll(), "eco", 1)).contains("/eco"));
+        // Explicit page-size overload reads the same live index.
+        assertTrue(PLAIN.serialize(gen.render(allowAll(), "eco", 1, 2)).contains("help (page 1/2)"));
     }
 }
