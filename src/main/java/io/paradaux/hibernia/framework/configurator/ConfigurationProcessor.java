@@ -6,6 +6,7 @@ import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.logging.Level;
@@ -90,6 +91,10 @@ public class ConfigurationProcessor {
             return config.contains(path) ? (float) config.getDouble(path) : Float.parseFloat(defaultValue);
         } else if (type == long.class || type == Long.class) {
             return config.contains(path) ? config.getLong(path) : Long.parseLong(defaultValue);
+        } else if (type == BigDecimal.class) {
+            // Money and other exact-decimal values: never route through double. Read the raw scalar
+            // (string or YAML number) and parse it losslessly, so 0.1 + 0.2 stays 0.3.
+            return parseBigDecimal(config, path, defaultValue);
         } else if (type == List.class) {
             return config.getStringList(path);
         } else if (type.isEnum()) {
@@ -104,5 +109,28 @@ public class ConfigurationProcessor {
 
         // For complex types, return the object directly
         return config.get(path);
+    }
+
+    /**
+     * Parse a {@link BigDecimal} from the raw config scalar (a string, or a YAML
+     * number coerced via {@code toString()}), falling back to the annotation
+     * default. A malformed value names the path so the operator can find it.
+     */
+    private BigDecimal parseBigDecimal(FileConfiguration config, String path, String defaultValue) {
+        String raw;
+        if (config.contains(path)) {
+            Object value = config.get(path);
+            raw = value == null ? defaultValue : value.toString();
+        } else {
+            raw = defaultValue;
+        }
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid BigDecimal value '" + raw + "' for " + path);
+        }
     }
 }
