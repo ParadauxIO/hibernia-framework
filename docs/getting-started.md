@@ -18,7 +18,7 @@ repositories {
     maven("https://repo.papermc.io/repository/maven-public/")
 
     maven("https://repo.paradaux.io/releases")   // stable
-    maven("https://repo.paradaux.io/snapshots")  // snapshots (1.1.0-SNAPSHOT)
+    maven("https://repo.paradaux.io/snapshots")  // snapshots of the next release
 }
 ```
 
@@ -26,13 +26,13 @@ The artifact:
 
 ```kotlin
 dependencies {
-    implementation("io.paradaux:hibernia-framework:1.1.0-SNAPSHOT")
+    implementation("io.paradaux:hibernia-framework:1.2.0")
 }
 ```
 
 > The `HiberniaModule` bootstrap, the event/listener tier, and the `usher` dialog framework described in
-> these docs are on **`1.1.0-SNAPSHOT`** until 1.1.0 is released. The command, configuration and message
-> modules are also present in the `1.0.x` stable line.
+> these docs need **1.1.0 or later**. The command, configuration and message modules are also present in
+> the `1.0.x` stable line.
 
 Guice 7 and Reflections come transitively (Guice is an `api` dependency — it's part of the framework's
 public surface). You **shade** the framework into your plugin jar like any library.
