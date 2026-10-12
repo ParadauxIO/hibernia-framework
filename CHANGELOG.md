@@ -9,9 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > adopted, so moving to `1.2.0` brings **both** the 1.1.0 and 1.2.0 changes. Read both
 > sections — especially the ⚠ behaviour-change notes.
 
-## [1.2.0] — Unreleased
-
-Published as `1.2.0-SNAPSHOT` for consumer testing.
+## [1.2.0] — 2026-10-12
 
 ### Added
 - **On-upgrade defaults reconciliation.** When the plugin version changes, keys that a
@@ -133,7 +131,7 @@ Initial release (ported from the Business plugin).
 - `Message` i18n with MiniMessage formatting (placeholder values escaped by default).
 - Domain exception types and `ListenerManager` for DI-managed Bukkit listeners.
 
-[1.2.0]: https://github.com/ParadauxIO/hibernia-framework/compare/v1.1.0...develop
+[1.2.0]: https://github.com/ParadauxIO/hibernia-framework/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ParadauxIO/hibernia-framework/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/ParadauxIO/hibernia-framework/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/ParadauxIO/hibernia-framework/compare/v1.0.0...v1.0.1
