@@ -48,6 +48,17 @@ Published as `1.2.0-SNAPSHOT` for consumer testing.
   collaborators. No behaviour change.
 - **Paper API** target bumped `1.21.8` → `1.21.11` to match the consumer plugins.
 
+### Fixed
+- **Placeholders inside quoted tag arguments.** `{name}` in a tag argument such as
+  `<click:open_url:'{url}'>`, `<click:run_command:'/x {firm}'>` or
+  `<click:copy_to_clipboard:'{token}'>` was replaced with the generated `<phN>` tag,
+  which MiniMessage never resolves inside another tag's arguments. The argument kept
+  the literal `<phN>`: `open_url` produced a chat packet the server could not encode
+  (the message was never delivered), and `run_command` / `copy_to_clipboard` carried
+  the wrong payload. Values in a quoted argument are now inserted as the value's plain
+  text, escaped so it cannot close the quote; palette placeholders are expanded the
+  same way. Placeholders outside tag arguments are unchanged.
+
 ### Backward compatibility
 - Existing `throw new NotFoundException("Some text")` sites are unchanged: a message that
   isn't a defined key falls back to the previous literal rendering.

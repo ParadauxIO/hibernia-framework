@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.ComponentLike;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
@@ -508,14 +509,59 @@ public final class Message {
             text = text.replace("{{", LBR).replace("}}", RBR);
             Matcher m = PLACEHOLDER.matcher(text);
             StringBuilder sb = new StringBuilder(text.length() + 16);
+            TagScanner scanner = new TagScanner(text);
             while (m.find()) {
                 String name = m.group(1);
-                String tag = tagFor(name);
-                m.appendReplacement(sb,
-                        Matcher.quoteReplacement(tag != null ? "<" + tag + ">" : "{" + name + "}"));
+                char quote = scanner.quoteAt(m.start());
+                String replacement;
+                if (quote != 0) {
+                    // Inside a quoted tag argument (<click:open_url:'{url}'>): MiniMessage never
+                    // resolves tags there, so a generated <phN> would be left in the argument
+                    // verbatim. Substitute the value itself, escaped so it can't close the quote.
+                    String literal = literalFor(name, 0);
+                    replacement = literal != null ? escapeArgument(literal, quote) : "{" + name + "}";
+                } else {
+                    String tag = tagFor(name);
+                    replacement = tag != null ? "<" + tag + ">" : "{" + name + "}";
+                }
+                m.appendReplacement(sb, Matcher.quoteReplacement(replacement));
             }
             m.appendTail(sb);
             return sb.toString().replace(LBR, "{").replace(RBR, "}");
+        }
+
+        /**
+         * The plain text a placeholder stands for, for use where markup can't apply (a tag
+         * argument): the caller's value as text, or a palette value with its own placeholders
+         * expanded the same way. {@code null} if the name is unknown.
+         */
+        private String literalFor(String name, int depth) {
+            Object value = values.get(name);
+            if (value instanceof Rich rich) {
+                return rich.value();
+            }
+            if (value instanceof ComponentLike componentLike) {
+                return PlainTextComponentSerializer.plainText().serialize(componentLike.asComponent());
+            }
+            if (value != null) {
+                return Objects.toString(value);
+            }
+            String palette = paletteValue(name);
+            if (palette == null || depth > MAX_LITERAL_DEPTH) {
+                return null;
+            }
+            Matcher m = PLACEHOLDER.matcher(palette);
+            StringBuilder sb = new StringBuilder(palette.length());
+            while (m.find()) {
+                String nested = literalFor(m.group(1), depth + 1);
+                m.appendReplacement(sb, Matcher.quoteReplacement(nested != null ? nested : m.group()));
+            }
+            m.appendTail(sb);
+            return sb.toString();
+        }
+
+        private static String escapeArgument(String value, char quote) {
+            return value.replace("\\", "\\\\").replace(String.valueOf(quote), "\\" + quote);
         }
 
         /** The generated tag for a known placeholder (registering its resolver), or {@code null}. */
@@ -562,6 +608,68 @@ public final class Message {
                 if (global != null) return global;
             }
             return null;
+        }
+    }
+
+    /** Guard against a palette placeholder that (indirectly) references itself. */
+    private static final int MAX_LITERAL_DEPTH = 16;
+
+    /**
+     * Answers "is this offset inside a quoted argument of a MiniMessage tag?" for increasing
+     * offsets of one pattern, in a single forward pass.
+     */
+    private static final class TagScanner {
+        private final String text;
+        private int pos;
+        private boolean inTag;
+        private char quote;
+
+        TagScanner(String text) {
+            this.text = text;
+        }
+
+        /** The quote character enclosing {@code offset}, or {@code 0} if it isn't in a quoted tag argument. */
+        char quoteAt(int offset) {
+            for (; pos < offset; pos++) {
+                char c = text.charAt(pos);
+                if (c == '\\') {
+                    pos++;                       // escaped character: never opens or closes anything
+                } else if (quote != 0) {
+                    if (c == quote) quote = 0;
+                } else if (inTag) {
+                    if (c == '\'' || c == '"') quote = c;
+                    else if (c == '>') inTag = false;
+                } else if (c == '<') {
+                    inTag = true;
+                }
+            }
+            return inTag && quote != 0 && closesAfter(offset) ? quote : 0;
+        }
+
+        /**
+         * Whether the quote open at {@code offset} is closed and its tag then ended. Without
+         * this, stray prose such as {@code a < b, it's {x}} would look like a tag argument and
+         * the value would be inserted as raw, unescaped text.
+         */
+        private boolean closesAfter(int offset) {
+            char open = quote;
+            boolean quoted = true;
+            for (int i = offset; i < text.length(); i++) {
+                char c = text.charAt(i);
+                if (c == '\\') {
+                    i++;
+                } else if (quoted) {
+                    if (c == open) quoted = false;
+                } else if (c == '\'' || c == '"') {
+                    open = c;
+                    quoted = true;
+                } else if (c == '>') {
+                    return true;
+                } else if (c == '<') {
+                    return false;
+                }
+            }
+            return false;
         }
     }
 
