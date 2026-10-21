@@ -26,7 +26,7 @@ import java.util.logging.Level;
  * it defines one. Extracted from {@link CommandManager} so the error-mapping phase is
  * isolated and independently testable.
  */
-final class ErrorRenderer {
+public final class ErrorRenderer {
 
     private static final String DEFAULT_NO_PERMISSION = "<red>You don't have permission to do that.</red>";
     private static final String DEFAULT_WITH_MESSAGE  = "<red>{message}</red>";
@@ -40,7 +40,8 @@ final class ErrorRenderer {
     private volatile Message message;
     private volatile boolean messageResolved;
 
-    ErrorRenderer(JavaPlugin plugin, Injector injector) {
+    /** Creates shared command/menu error rendering with an optional Message binding. */
+    public ErrorRenderer(JavaPlugin plugin, Injector injector) {
         this.plugin = plugin;
         this.injector = injector;
     }
@@ -64,7 +65,7 @@ final class ErrorRenderer {
      * the taxonomy is a bug: the sender gets a generic message and the full
      * stack trace goes to the server log.
      */
-    void handleInvocationFailure(CommandSender sender, Throwable t, String describe) {
+    public void handleInvocationFailure(CommandSender sender, Throwable t, String describe) {
         if (t instanceof NoPermissionException) {
             renderException(sender, t, CommandManager.KEY_NO_PERMISSION, DEFAULT_NO_PERMISSION, Map.of());
         } else if (t instanceof BadCommandException) {

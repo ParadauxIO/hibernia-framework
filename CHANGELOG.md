@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > adopted, so moving to `1.2.0` brings **both** the 1.1.0 and 1.2.0 changes. Read both
 > sections — especially the ⚠ behaviour-change notes.
 
+## [Unreleased] — 1.3.0-SNAPSHOT
+
+### Added
+- **Curator chest menus.** Guice-registered menu handlers with annotated screens/actions,
+  per-viewer models, paginated layouts, fixed controls, item previews and navigation
+  that preserves the parent page. Inventory transfers are blocked and stale clicks or
+  asynchronous completions cannot reopen a closed or replaced flow.
+- A compiled `/find` results example and [integration/parity guide](docs/curator.md)
+  covering ChestShopDatabase's chest results and preview behavior.
+
 ## [1.2.0] — 2026-10-12
 
 ### Added

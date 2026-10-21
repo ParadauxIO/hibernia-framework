@@ -7,6 +7,7 @@ import io.paradaux.hibernia.framework.commander.spi.CommandHandler;
 import io.paradaux.hibernia.framework.commander.spi.ParameterResolver;
 import io.paradaux.hibernia.framework.configurator.ConfigurationLoader;
 import io.paradaux.hibernia.framework.i18n.Message;
+import io.paradaux.hibernia.framework.curator.spi.MenuHandler;
 import io.paradaux.hibernia.framework.upgrade.DefaultsReconciler;
 import io.paradaux.hibernia.framework.i18n.PapiSupport;
 import io.paradaux.hibernia.framework.i18n.PlaceholderApiSupport;
@@ -38,7 +39,7 @@ import java.util.Objects;
  *       {@link Builder#withoutMessages()} if the plugin bundles no
  *       {@code messages.properties})</li>
  *   <li>Multibinder sets for {@link CommandHandler}, {@link ParameterResolver},
- *       Bukkit {@link Listener}, {@link DialogHandler} and {@link InputBinder}
+ *       Bukkit {@link Listener}, {@link DialogHandler}, {@link MenuHandler} and {@link InputBinder}
  *       implementations</li>
  *   <li>{@link DialogRenderer} to the Paper-backed renderer, plus an optional
  *       {@link BedrockSupport} when {@link Builder#bedrockSupport(Class)} is set</li>
@@ -73,6 +74,7 @@ public final class HiberniaModule extends AbstractModule {
     private final List<Class<? extends ParameterResolver<?>>> resolvers;
     private final List<Class<? extends Listener>> listeners;
     private final List<Class<? extends DialogHandler>> dialogs;
+    private final List<Class<? extends MenuHandler>> menus;
     private final List<Class<? extends InputBinder<?>>> inputBinders;
     private final Class<? extends BedrockSupport> bedrockSupport;
     private final Class<? extends PapiSupport> papiSupport;
@@ -84,6 +86,7 @@ public final class HiberniaModule extends AbstractModule {
         this.resolvers = List.copyOf(builder.resolvers);
         this.listeners = List.copyOf(builder.listeners);
         this.dialogs = List.copyOf(builder.dialogs);
+        this.menus = List.copyOf(builder.menus);
         this.inputBinders = List.copyOf(builder.inputBinders);
         this.bedrockSupport = builder.bedrockSupport;
         this.papiSupport = builder.papiSupport;
@@ -151,6 +154,9 @@ public final class HiberniaModule extends AbstractModule {
                 Multibinder.newSetBinder(binder(), new TypeLiteral<InputBinder<?>>() {});
         inputBinders.forEach(b -> inputBinderBinder.addBinding().to(b));
 
+        Multibinder<MenuHandler> menuBinder = Multibinder.newSetBinder(binder(), MenuHandler.class);
+        menus.forEach(m -> menuBinder.addBinding().to(m));
+
         bind(DialogRenderer.class).to(PaperDialogRenderer.class);
         if (bedrockSupport != null) {
             bind(BedrockSupport.class).to(bedrockSupport);
@@ -170,6 +176,7 @@ public final class HiberniaModule extends AbstractModule {
         private final List<Class<? extends ParameterResolver<?>>> resolvers = new ArrayList<>();
         private final List<Class<? extends Listener>> listeners = new ArrayList<>();
         private final List<Class<? extends DialogHandler>> dialogs = new ArrayList<>();
+        private final List<Class<? extends MenuHandler>> menus = new ArrayList<>();
         private final List<Class<? extends InputBinder<?>>> inputBinders = new ArrayList<>();
         private Class<? extends BedrockSupport> bedrockSupport;
         private Class<? extends PapiSupport> papiSupport = PlaceholderApiSupport.class;
@@ -211,6 +218,13 @@ public final class HiberniaModule extends AbstractModule {
         @SafeVarargs
         public final Builder dialogs(Class<? extends DialogHandler>... classes) {
             dialogs.addAll(List.of(classes));
+            return this;
+        }
+
+        /** Chest menu handlers to bind into the menu multibinder. */
+        @SafeVarargs
+        public final Builder menus(Class<? extends MenuHandler>... classes) {
+            menus.addAll(List.of(classes));
             return this;
         }
 
