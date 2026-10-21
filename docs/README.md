@@ -18,6 +18,7 @@ The framework does **not** own your business logic or your database. That separa
 | [Messages & i18n](messages.md) | `messages.properties`, placeholders, MiniMessage, value escaping |
 | [Exceptions](exceptions.md) | The HTTP-semantic exceptions and how they render to players |
 | [Events](events.md) | DI-managed Bukkit listeners via `ListenerManager` |
+| [Chest menus (Curator)](curator.md) | `curator`: chest layouts, pagination, annotated handlers, previews and async flows |
 | [Dialogs (Usher)](dialogs.md) | `usher`: `@Dialog`/`@Screen`/`@Action`, typed inputs, navigation, async |
 
 ## At a glance
@@ -45,6 +46,7 @@ public void onEnable() {
 ## Modules
 
 - **`commander`** — annotation-driven commands over Brigadier, with registration-time validation.
+- **`curator`** — annotation-driven chest inventories with protected slots, paging and per-player flows.
 - **`usher`** — annotation-driven dialogs over Paper's Dialog API.
 - **`configurator`** — reflective `config.yml` → POJO injection with in-place reload.
 - **`i18n`** — templated, MiniMessage-formatted, injection-safe player messaging.

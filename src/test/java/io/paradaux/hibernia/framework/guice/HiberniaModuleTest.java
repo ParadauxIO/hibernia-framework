@@ -95,6 +95,29 @@ class HiberniaModuleTest {
     }
 
     @Test
+    void menuHandlersAndManagerAreBoundThroughFrameworkModule() {
+        when(server.isPrimaryThread()).thenReturn(true);
+        var module = HiberniaModule.forPlugin(plugin).withoutMessages().withoutDefaultsReconciliation()
+                .menus(TestMenu.class).build();
+        var injector = Guice.createInjector(module);
+        var menus = injector.getInstance(Key.get(new TypeLiteral<Set<io.paradaux.hibernia.framework.curator.spi.MenuHandler>>() {}));
+        assertEquals(1, menus.size());
+        assertInstanceOf(TestMenu.class, menus.iterator().next());
+        var manager = injector.getInstance(io.paradaux.hibernia.framework.curator.MenuManager.class);
+        assertSame(manager, injector.getInstance(io.paradaux.hibernia.framework.curator.MenuManager.class));
+        manager.registerAll();
+        verify(pluginManager).registerEvents(manager, plugin);
+        manager.shutdown();
+    }
+
+    public static final class TestMenu implements io.paradaux.hibernia.framework.curator.spi.MenuHandler {
+        @io.paradaux.hibernia.framework.curator.annotations.Screen
+        public io.paradaux.hibernia.framework.curator.MenuView main() {
+            return io.paradaux.hibernia.framework.curator.MenuView.chest(net.kyori.adventure.text.Component.empty(), 1).build();
+        }
+    }
+
+    @Test
     void configuration_isAvailableBeforeInjectorExists() {
         HiberniaModule module = module();
 
