@@ -55,9 +55,10 @@ class MenuManagerTest {
         when(player.getUniqueId()).thenReturn(UUID.randomUUID());
         when(player.getOpenInventory()).thenReturn(open);
         when(open.getTopInventory()).thenAnswer(call -> top);
-        when(server.createInventory(isNull(), anyInt(), any(Component.class))).thenAnswer(call -> {
+        when(server.createInventory(any(org.bukkit.inventory.InventoryHolder.class), anyInt(), any(Component.class))).thenAnswer(call -> {
             Inventory inventory = mock(Inventory.class);
             when(inventory.getSize()).thenReturn(call.getArgument(1));
+            when(inventory.getHolder()).thenReturn(call.getArgument(0));
             return inventory;
         });
         when(player.openInventory(any(Inventory.class))).thenAnswer(call -> {

@@ -9,7 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > adopted, so moving to `1.2.0` brings **both** the 1.1.0 and 1.2.0 changes. Read both
 > sections — especially the ⚠ behaviour-change notes.
 
-## [Unreleased] — 1.3.0-SNAPSHOT
+## [Unreleased] — 1.3.1-SNAPSHOT
+
+### Fixed
+- **Curator display inventory ownership.** Reject opens by other viewers and reopening of
+  retired inventories. Cancel transfers based on the inventory's private holder, even
+  after the active session is gone, and clear copied icons on close, refresh, cancelled
+  or failed opens, disconnect and shutdown.
+- Added MockBukkit event integration tests for every inventory action and click type,
+  including bundle interactions, creative packets, drag modes, all close reasons,
+  cross-listener lifecycle changes and retained inventory references. A controlled
+  missing-cancellation mutation is detected by all 25 action cases.
+
+## [1.3.0] — 2026-10-21
 
 ### Added
 - **Curator chest menus.** Guice-registered menu handlers with annotated screens/actions,

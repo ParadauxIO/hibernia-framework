@@ -8,7 +8,7 @@ plugins {
 
 group = "io.paradaux"
 version = providers.gradleProperty("version")
-    .orElse("1.3.0-SNAPSHOT")
+    .orElse("1.3.1-SNAPSHOT")
     .get()
 
 java {
@@ -51,6 +51,10 @@ dependencies {
     testImplementation("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testImplementation("org.mockito:mockito-core:5.14.2")
+    // Exercise registered inventory listeners and real in-memory inventories/items.
+    testImplementation("org.mockbukkit.mockbukkit:mockbukkit-v1.21:4.110.0") {
+        exclude(group = "org.junit.jupiter") // Keep this project's JUnit 5 API and engine aligned.
+    }
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

@@ -21,6 +21,7 @@ import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.server.PluginDisableEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.lang.reflect.InvocationTargetException;
@@ -83,18 +84,20 @@ public final class MenuManager implements Listener {
     /** Invalidates pending callbacks, closes owned views and unregisters listeners. Safe to call repeatedly. */
     public void shutdown() {
         requireMain();
+        registered = false;
         for (Session session : java.util.List.copyOf(sessions.values())) close(session.flow());
         HandlerList.unregisterAll(this);
-        registered = false;
         definitions.clear();
     }
 
     /** Cancels all item transfers and defers valid actions until the inventory transaction has completed. */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onClick(InventoryClickEvent event) {
-        Session session = session(event.getWhoClicked().getUniqueId(), event.getView().getTopInventory());
-        if (session == null) return;
+        Inventory inventory = event.getView().getTopInventory();
+        if (!owns(inventory)) return;
         event.setCancelled(true);
+        Session session = session(event.getWhoClicked().getUniqueId(), inventory);
+        if (session == null) return;
         ClickType click = event.getClick();
         if (click != ClickType.LEFT && click != ClickType.RIGHT
                 && click != ClickType.SHIFT_LEFT && click != ClickType.SHIFT_RIGHT) return;
@@ -116,7 +119,7 @@ public final class MenuManager implements Listener {
     /** Blocks drag distribution into or across a managed inventory. */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDrag(InventoryDragEvent event) {
-        if (session(event.getWhoClicked().getUniqueId(), event.getView().getTopInventory()) != null) {
+        if (owns(event.getView().getTopInventory())) {
             event.setCancelled(true);
         }
     }
@@ -124,6 +127,7 @@ public final class MenuManager implements Listener {
     /** Handles escape-to-parent while ensuring replacement inventories cannot revive old screens. */
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
+        if (owns(event.getInventory())) event.getInventory().clear();
         Session session = session(event.getPlayer().getUniqueId(), event.getInventory());
         if (session == null) return;
         if (event.getReason() == InventoryCloseEvent.Reason.PLAYER && session.flow().view().backOnClose()) {
@@ -141,12 +145,21 @@ public final class MenuManager implements Listener {
         }
     }
 
+    /** Rejects foreign viewers and attempts to reopen retired display inventories. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onMenuOpen(InventoryOpenEvent event) {
+        if (!owns(event.getInventory())) return;
+        Session session = session(event.getPlayer().getUniqueId(), event.getInventory());
+        if (!registered || session == null || !session.flow().active()) event.setCancelled(true);
+    }
+
     /** An external inventory opened during a deferred return takes precedence over this journey. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onOpen(InventoryOpenEvent event) {
         Session session = sessions.get(event.getPlayer().getUniqueId());
         if (session != null && session.inventory() != event.getInventory()) {
             sessions.remove(event.getPlayer().getUniqueId());
+            session.inventory().clear();
             session.flow().invalidate();
         }
     }
@@ -155,7 +168,10 @@ public final class MenuManager implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Session session = sessions.remove(event.getPlayer().getUniqueId());
-        if (session != null) session.flow().invalidate();
+        if (session != null) {
+            session.inventory().clear();
+            session.flow().invalidate();
+        }
     }
 
     /** Cleans up when the owning plugin is disabled. */
@@ -189,7 +205,9 @@ public final class MenuManager implements Listener {
                 throw new IllegalArgumentException("Unknown menu action: " + item.action());
             }
         }
-        Inventory inventory = plugin.getServer().createInventory(null, view.size(), view.title());
+        MenuInventory holder = new MenuInventory(this);
+        Inventory inventory = plugin.getServer().createInventory(holder, view.size(), view.title());
+        holder.inventory = inventory;
         items.forEach((slot, item) -> inventory.setItem(slot, item.icon()));
         flow.shown(view, preservePage);
         Session next = new Session(flow, inventory, items);
@@ -197,11 +215,13 @@ public final class MenuManager implements Listener {
         try {
             flow.player().openInventory(inventory);
         } catch (RuntimeException ex) {
+            inventory.clear();
             restorePreviousIfOpen(next, previous);
             throw ex;
         }
         // InventoryOpenEvent may have been cancelled or redirected by another plugin.
         if (flow.player().getOpenInventory().getTopInventory() != inventory) {
+            inventory.clear();
             restorePreviousIfOpen(next, previous);
             close(flow);
         }
@@ -213,6 +233,7 @@ public final class MenuManager implements Listener {
         flow.invalidate();
         if (session == null || session.flow() != flow) return;
         sessions.remove(flow.player().getUniqueId());
+        session.inventory().clear();
         if (flow.player().getOpenInventory().getTopInventory() == session.inventory()) flow.player().closeInventory();
     }
 
@@ -226,6 +247,10 @@ public final class MenuManager implements Listener {
                 && cause.getCause() != null) cause = cause.getCause();
         errors.handleInvocationFailure(flow.player(), cause, "menu " + flow.handler().getName());
         close(flow);
+    }
+
+    private boolean owns(Inventory inventory) {
+        return inventory.getHolder() instanceof MenuInventory holder && holder.manager == this;
     }
 
     private void restorePreviousIfOpen(Session next, Session previous) {
@@ -298,6 +323,20 @@ public final class MenuManager implements Listener {
     }
 
     private record Definition(MenuHandler handler, Map<String, Method> screens, Map<String, Method> actions) {}
+
+    private static final class MenuInventory implements InventoryHolder {
+        private final MenuManager manager;
+        private Inventory inventory;
+
+        private MenuInventory(MenuManager manager) {
+            this.manager = manager;
+        }
+
+        @Override
+        public Inventory getInventory() {
+            return Objects.requireNonNull(inventory, "Inventory is not initialized");
+        }
+    }
 
     private static final class Session {
         private final MenuFlow flow;
