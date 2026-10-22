@@ -148,8 +148,32 @@ The framework intentionally requires explicit action routing. Number keys, drops
 do not execute the original GUI's catch-all left-command fallback. This preserves direction/GPS
 controls without triggering commands from inventory-transfer gestures.
 
-Verification covers page boundaries (0/45/46/90/91 entries), fixed layouts, metadata copying,
-left/right dispatch, blocked transfer gestures, async preview/cache return, stale callback rejection,
-viewer lifecycle, registration validation and Guice bootstrap. Bukkit inventories/events and the
-scheduler are mocked at the platform boundary; a live Paper/Geyser interaction test remains necessary
-before deploying a consumer migration. No database, direction plugin or server was modified here.
+## Item safety and verification
+
+Curator inventories carry a private holder identifying the owning manager. Click and drag protection
+follows that inventory, even if the viewer's active session has ended. Opening a retired display or
+another player's display is rejected. Closing, replacing, disconnecting or shutting down clears
+copied display icons before releasing the inventory. Existing player inventory and cursor stacks
+remain subject to the server's normal close behavior; the framework never grants display items.
+
+The `MenuInventorySafetyTest` integration suite uses MockBukkit's registered event dispatcher with
+real Bukkit event objects, in-memory inventories and ItemStack metadata. It checks:
+
+- Every `InventoryAction` crossed with every `ClickType` at actionable, decorative, empty, bottom,
+  hotbar and outside slots, including bundle transfer actions, swaps, collection and drops.
+- Both drag modes across top, bottom and mixed slots, and creative inventory events.
+- All inventory-close reasons, disconnect, shutdown, cancelled refreshes and stale async results.
+- Foreign viewers, retired references, listeners that close or replace screens mid-event, and
+  independence between menu managers belonging to different plugins.
+- Icon copies do not alias input templates, and denied events leave display, player and cursor state
+  unchanged. Unsupported MockBukkit test operations fail rather than silently skip safety checks.
+
+These tests reproduced five ownership/retirement failures before the repair. In an isolated source
+copy, removing click cancellation makes all 25 action cases fail on `DEFAULT` versus expected `DENY`.
+The existing tests additionally cover paging, preview caching, navigation, registration and Guice.
+
+The event tests verify Paper's cancellation contract; MockBukkit does **not** execute vanilla packet
+processing or its complete item-transfer algorithm. They are not proof against every Minecraft bug,
+client exploit, or another plugin deliberately undoing cancellation or directly copying items.
+Live Paper/Geyser packet-level verification with the deployed plugin set remains a separate check.
+No database, direction plugin or running server was modified here.
